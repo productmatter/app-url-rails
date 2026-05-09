@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Validate gemspec
+        run: gem build git-treeline-rails.gemspec --strict
+
+      - name: Smoke test
+        run: bundle exec ruby -e "require 'git/treeline/rails/version'; puts Git::Treeline::Rails::VERSION"
+
+      - name: Unit tests
+        run: ruby test/railtie_test.rb
+
+      - name: Integration tests
+        run: bundle exec ruby test/integration_test.rb
