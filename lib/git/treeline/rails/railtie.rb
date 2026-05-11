@@ -9,9 +9,6 @@ module Git
         TREELINE_CONFIG = ".treeline.yml"
         DEFAULT_ENV_TARGET = ".env.local"
 
-        config.git_treeline_rails = ::ActiveSupport::OrderedOptions.new
-        config.git_treeline_rails.cookie_domain = :all
-
         initializer "git_treeline.apply_allocation", before: :load_environment_config do
           next unless ::Rails.env.development?
 
@@ -47,17 +44,6 @@ module Git
           ::ActiveSupport.on_load(:action_mailer) do
             self.default_url_options = opts
           end
-        end
-
-        initializer "git_treeline.session_cookie_domain", after: :load_config_initializers do |app|
-          next unless ::Rails.env.development?
-
-          domain = app.config.git_treeline_rails.cookie_domain
-          next if domain.nil?
-
-          options = app.config.session_options || {}
-          options[:domain] = domain
-          app.config.session_options = options
         end
 
         class << self

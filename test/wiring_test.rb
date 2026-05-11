@@ -102,14 +102,17 @@ class WiringIntegrationTest < Minitest::Test
     refute_includes result["hosts"], ".ngrok-free.app"
   end
 
-  def test_session_cookie_domain_defaults_to_all_in_development
+  def test_gem_does_not_modify_session_options
     result = boot_and_dump
-    assert_equal "all", result["session_options"]["domain"]
+    refute_includes result["session_options"].keys, "domain",
+                    "gem must not touch session_options (cookie management is app-level)"
   end
 
-  def test_session_cookie_domain_opt_out
-    result = boot_and_dump(app_config: "config.git_treeline_rails.cookie_domain = nil")
-    refute_includes result["session_options"].keys, "domain"
+  def test_gem_does_not_modify_session_options_when_app_sets_domain
+    result = boot_and_dump(
+      app_config: 'config.session_store :cookie_store, key: "_test_session", domain: ".example.com"'
+    )
+    assert_equal ".example.com", result["session_options"]["domain"]
   end
 
   def test_treeline_yml_loaded_env_drives_wiring
