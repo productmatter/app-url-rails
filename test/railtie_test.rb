@@ -8,12 +8,19 @@ require "fileutils"
 require_relative "../lib/git/treeline/rails/version"
 
 # Load the Railtie class without requiring Rails by stubbing the constant.
+require "active_support/ordered_options"
+
 module Rails
   class Railtie
     def self.initializer(*); end
+    def self.config
+      @config ||= ActiveSupport::OrderedOptions.new
+    end
   end
 end
 
+require_relative "../lib/git/treeline/rails/gtl_adapter"
+require_relative "../lib/git/treeline/rails/tunnel_url"
 require_relative "../lib/git/treeline/rails/railtie"
 
 class ReadEnvTargetTest < Minitest::Test

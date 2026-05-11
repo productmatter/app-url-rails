@@ -6,4 +6,5 @@ gemspec
 
 group :test do
   gem "minitest", "~> 5.27"
+  gem "actionmailer", ">= 7.0"
 end

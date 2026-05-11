@@ -1,11 +1,16 @@
 # frozen_string_literal: true
 
+require "uri"
+
 module Git
   module Treeline
     module Rails
       class Railtie < ::Rails::Railtie
         TREELINE_CONFIG = ".treeline.yml"
         DEFAULT_ENV_TARGET = ".env.local"
+
+        config.git_treeline_rails = ::ActiveSupport::OrderedOptions.new
+        config.git_treeline_rails.cookie_domain = :all
 
         initializer "git_treeline.apply_allocation", before: :load_environment_config do
           next unless ::Rails.env.development?
@@ -20,6 +25,39 @@ module Git
           Git::Treeline::Rails::Railtie.parse_env_file(env_path).each do |key, value|
             ENV[key] ||= value
           end
+        end
+
+        initializer "git_treeline.host_allowlist", before: :load_config_initializers do |app|
+          next unless ::Rails.env.development?
+
+          dev_host = Git::Treeline::Rails::Railtie.dev_access_host
+          app.config.hosts << dev_host if dev_host
+
+          wildcard = Git::Treeline::Rails::Railtie.tunnel_wildcard
+          app.config.hosts << wildcard if wildcard
+        end
+
+        initializer "git_treeline.default_url_options", before: :load_config_initializers do
+          next unless ::Rails.env.development?
+
+          opts = Git::Treeline::Rails::Railtie.dev_access_url_options
+          next if opts.nil?
+
+          ::Rails.application.default_url_options = opts
+          ::ActiveSupport.on_load(:action_mailer) do
+            self.default_url_options = opts
+          end
+        end
+
+        initializer "git_treeline.session_cookie_domain", after: :load_config_initializers do |app|
+          next unless ::Rails.env.development?
+
+          domain = app.config.git_treeline_rails.cookie_domain
+          next if domain.nil?
+
+          options = app.config.session_options || {}
+          options[:domain] = domain
+          app.config.session_options = options
         end
 
         class << self
@@ -48,6 +86,40 @@ module Git
               vars[key.strip] = value
             end
             vars
+          end
+
+          def dev_access_host
+            url = ENV["DEV_ACCESS_URL"]
+            return nil if url.nil? || url.empty?
+
+            URI(url).host
+          rescue URI::InvalidURIError
+            nil
+          end
+
+          def dev_access_url_options
+            url = ENV["DEV_ACCESS_URL"]
+            return nil if url.nil? || url.empty?
+
+            parsed = URI(url)
+            opts = { host: parsed.host, protocol: parsed.scheme }
+            opts[:port] = parsed.port unless parsed.port == parsed.default_port
+            opts
+          rescue URI::InvalidURIError
+            nil
+          end
+
+          def tunnel_wildcard
+            host = Git::Treeline::Rails::TunnelUrl.host
+            return nil unless host
+
+            parent = host.split(".", 2).last
+            return nil unless parent&.include?(".")
+
+            ".#{parent}"
+          rescue Git::Treeline::Rails::GtlAdapter::Error => e
+            ::Kernel.warn("[git-treeline-rails] tunnel discovery failed: #{e.message}")
+            nil
           end
         end
       end
