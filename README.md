@@ -1,45 +1,61 @@
 # tunnel-url-rails
 
-Tiny, provider-agnostic helper for generating outsider-reachable URLs in Rails
-apps that have a tunnel set up for development.
+Tiny, provider-agnostic helper for Rails apps that need outsider-reachable
+URLs during local development — webhook callbacks, OAuth redirects, SMS links,
+partner API responses. Reads `TUNNEL_URL` from the environment. **Touches
+nothing in production.**
 
-## What it does
+## Why this exists
 
-You set `TUNNEL_URL` to whatever your tunnel agent gave you (ngrok, Cloudflare
-Tunnel, anything else). At request time, your app's webhook callbacks,
-consumer-facing SMS links, partner-facing API responses, etc., can use
-`TunnelUrl.public_url_options` to get a hash suitable for Rails' `*_url`
-helpers — tunnel URL preferred, falls back to your app's
-`default_url_options`.
+Most Rails apps end up with host-building logic scattered across controllers,
+mailers, and service objects — `request.host`, `Rails.application.routes.default_url_options`,
+hard-coded `ENV` reads, the occasional `URI.join`. It works until something
+outside your laptop needs the URL: a webhook callback, an SMS link, a partner
+API response, an OAuth redirect. Then you add a tunnel, and every one of those
+call sites needs to know about it.
 
-That's all.
+`TunnelUrl` is one place to ask "what host should outsiders use right now?" —
+tunnel if set, otherwise your app's configured host. Call sites stop caring
+whether they're in development or production.
 
-## What it doesn't do
+## What it gives your app
 
-- Tell Rails about `config.hosts` — you do this in `development.rb` (see
-  [Setup](#setup-developmentrb)).
-- Set `default_url_options` — you do this in `development.rb` (see
-  [Setup](#setup-developmentrb)).
-- Auto-discover your tunnel URL — you set `TUNNEL_URL` however you want (env
-  file, tunnel-agent script, shell export).
-- Manage cookies, OAuth, or anything else.
+- A single API for outsider-reachable URLs — `TunnelUrl.public_url_options` —
+  that you can pass to any Rails `*_url` helper.
+- Automatic fallback to `Rails.application.default_url_options` when
+  `TUNNEL_URL` is unset. Call sites don't branch on environment.
+- Provider-agnostic. ngrok, Cloudflare Tunnel, anything that hands you a URL.
+- No Railtie, no autoloaded initializer, no monkey patches. Just a class plus
+  a one-shot install generator that writes visible code into your repo.
+
+## Production behavior
+
+This gem only matters when `TUNNEL_URL` is set, which is a local-development
+concern. In production, `TUNNEL_URL` is unset, so:
+
+- `TunnelUrl.public_url_options` returns exactly
+  `Rails.application.default_url_options`.
+- `TunnelUrl.public_base_url` returns the URL assembled from those same
+  options.
+- Nothing else runs. There's no Railtie, no initializer, no hook into the
+  request cycle.
+
+Your production URL generation is unchanged. Put the gem in `:development,
+:test` only or in all groups — either is fine.
 
 ## Install
 
-```ruby
-# Gemfile
-group :development, :test do
-  gem "tunnel-url-rails"
-end
-```
-
 ```sh
-bundle install
+bundle add tunnel-url-rails --group "development test"
+bin/rails g tunnel_url:install
 ```
 
-(Production doesn't need the gem — call sites that reference `TunnelUrl` only
-fire when `TUNNEL_URL` is set, which is a development-environment concern. If
-you prefer to require it in all groups for simplicity, that's fine too.)
+The generator injects a `TUNNEL_URL` block into
+`config/environments/development.rb`. It's idempotent — safe to re-run, skips
+if the block is already present.
+
+That's the entire setup. With no `TUNNEL_URL` in the environment, your app
+boots and behaves exactly as it did before.
 
 ## Usage
 
@@ -67,35 +83,52 @@ Typical use in a controller, mailer, or service:
 redirect_to some_callback_url(**TunnelUrl.public_url_options, token: t)
 ```
 
-## Setup (`development.rb`)
+## What the generator does
 
-The gem deliberately does **not** wire `config.hosts` or `default_url_options`
-for you. Add these lines to `config/environments/development.rb`:
+The generator injects this block inside `Rails.application.configure do` in
+`config/environments/development.rb`:
 
 ```ruby
-Rails.application.configure do
-  # ... existing config ...
-
-  if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
-    uri = URI(tunnel)
-    config.hosts << uri.host
-    routes.default_url_options = { host: uri.host, protocol: uri.scheme }
-  end
+if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
+  require "uri"
+  uri = URI(tunnel)
+  config.hosts << uri.host
+  routes.default_url_options = { host: uri.host, protocol: uri.scheme }
 end
 ```
 
-This must run during config-time (inside the `configure` block), **not** in an
+This must run at **config-time** (inside the `configure` block), not in an
 initializer or `config.after_initialize`. `ActionDispatch::HostAuthorization`
 snapshots `config.hosts` during `Rails.application.initialize!`, so any host
-added after that point is silently ignored.
+added after that point is silently ignored. The generator puts the block in
+the right place so you don't have to think about it.
+
+Prefer to paste this manually? That's fine — the gem doesn't care how the env
+var or host config gets set up.
+
+## Using with git-treeline
+
+If you use [git-treeline](https://github.com/git-treeline/git-treeline) (or
+any tool that runs multiple worktrees in parallel), each workspace can carry
+its own `TUNNEL_URL`. Treeline sets it dynamically when a workspace starts,
+so parallel branches each get an outsider-reachable URL without you editing
+`.env` by hand or juggling tunnel agents.
+
+`TunnelUrl` reads whatever's in the environment at request time, so there's
+nothing extra to wire up beyond the generator — the gem is deliberately
+agnostic about how `TUNNEL_URL` got there.
 
 ## Why this isn't a Railtie
 
-The wiring above is a handful of inline lines with one non-obvious constraint
-(the phase-ordering rule about `HostAuthorization`). That constraint is more
-honestly captured by a comment in your app's `development.rb` than by a
-Railtie that hides the timing. The class is what's worth sharing across
-apps; the wiring isn't.
+The wiring is a handful of inline lines with one non-obvious constraint (the
+phase-ordering rule about `HostAuthorization`). That constraint is more
+honestly captured by visible code in your app's `development.rb` than by a
+Railtie that hides the timing. The class is what's worth sharing across apps;
+the wiring isn't.
+
+The install generator is a one-shot that writes the wiring into your repo —
+visible, editable, version-controlled. Nothing runs at boot from the gem
+itself.
 
 ## Caveat: session cookies on Public Suffix List hosts
 
