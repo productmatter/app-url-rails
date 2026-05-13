@@ -16,6 +16,7 @@ Steps to reproduce the behavior:
 What you expected to happen.
 
 **Environment**
-- OS:
-- `git-treeline version` output:
-- Shell:
+- Ruby version:
+- Rails version:
+- `tunnel-url-rails` version:
+- Tunnel provider (ngrok, Cloudflare Tunnel, etc.):

@@ -1,12 +1,12 @@
-# Contributing to git-treeline-rails
+# Contributing to tunnel-url-rails
 
 Thanks for considering a contribution. Here's what you need to know.
 
 ## Setup
 
 ```bash
-git clone https://github.com/git-treeline/git-treeline-rails.git
-cd git-treeline-rails
+git clone https://github.com/jonathansimmons/tunnel-url-rails.git
+cd tunnel-url-rails
 bundle install
 ```
 
@@ -16,7 +16,7 @@ Requires Ruby 3.2+.
 
 1. Fork the repo and create a branch from `main`.
 2. Write tests for new behavior.
-3. Run `gem build git-treeline-rails.gemspec --strict` to validate the gemspec.
+3. Run `gem build tunnel-url-rails.gemspec --strict` to validate the gemspec.
 4. Open a pull request with a clear description of the change and why it's needed.
 
 ## Pull request expectations

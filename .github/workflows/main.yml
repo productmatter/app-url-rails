@@ -17,10 +17,10 @@ jobs:
           bundler-cache: true
 
       - name: Validate gemspec
-        run: gem build git-treeline-rails.gemspec --strict
+        run: gem build tunnel-url-rails.gemspec --strict
 
       - name: Smoke test
-        run: bundle exec ruby -e "require 'git/treeline/rails/version'; puts Git::Treeline::Rails::VERSION"
+        run: bundle exec ruby -Ilib -e "require 'tunnel_url'; puts TunnelUrl::VERSION"
 
       - name: Tests
         run: bundle exec rake test

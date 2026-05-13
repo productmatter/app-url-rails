@@ -1,175 +1,115 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require "minitest/mock"
+require_relative "../lib/tunnel_url"
 
-require_relative "../lib/git/treeline/rails/gtl_adapter"
-require_relative "../lib/git/treeline/rails/tunnel_url"
+module Rails
+  class << self
+    attr_accessor :application
+  end
+end
+
+class FakeApplication
+  attr_accessor :default_url_options
+
+  def initialize
+    @default_url_options = {}
+  end
+end
 
 class TunnelUrlTest < Minitest::Test
-  TunnelUrl = Git::Treeline::Rails::TunnelUrl
-  GtlAdapter = Git::Treeline::Rails::GtlAdapter
-
-  TRACKED_ENV = %w[TUNNEL_PROVIDER NGROK_URL DEV_ACCESS_URL].freeze
-
   def setup
-    @saved_env = TRACKED_ENV.to_h { |k| [k, ENV[k]] }
-    TRACKED_ENV.each { |k| ENV.delete(k) }
-    TunnelUrl.reset!
+    @saved_tunnel_url = ENV["TUNNEL_URL"]
+    ENV.delete("TUNNEL_URL")
+    Rails.application = FakeApplication.new
   end
 
   def teardown
-    @saved_env.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
-    TunnelUrl.reset!
+    @saved_tunnel_url.nil? ? ENV.delete("TUNNEL_URL") : ENV["TUNNEL_URL"] = @saved_tunnel_url
+    Rails.application = nil
   end
 
-  def test_returns_nil_for_provider_none
-    ENV["TUNNEL_PROVIDER"] = "none"
+  # url
+
+  def test_url_returns_nil_when_env_unset
     assert_nil TunnelUrl.url
   end
 
-  def test_defaults_to_none_when_provider_unset
+  def test_url_returns_nil_when_env_empty
+    ENV["TUNNEL_URL"] = ""
     assert_nil TunnelUrl.url
   end
 
-  def test_returns_ngrok_url_for_provider_ngrok
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "https://abc.ngrok-free.app"
+  def test_url_returns_value_when_env_set
+    ENV["TUNNEL_URL"] = "https://abc.ngrok-free.app"
     assert_equal "https://abc.ngrok-free.app", TunnelUrl.url
   end
 
-  def test_raises_when_ngrok_provider_without_url
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    assert_raises(KeyError) { TunnelUrl.url }
-  end
+  # host
 
-  def test_invokes_gtl_adapter_for_provider_gtl
-    ENV["TUNNEL_PROVIDER"] = "gtl"
-    GtlAdapter.stub :tunnel_url, "https://feature.gtltunnel.dev" do
-      assert_equal "https://feature.gtltunnel.dev", TunnelUrl.url
-    end
-  end
-
-  def test_caches_url_across_calls
-    counter = 0
-    TunnelUrl.register("counter_provider") do
-      counter += 1
-      "https://test.example.com"
-    end
-    ENV["TUNNEL_PROVIDER"] = "counter_provider"
-    3.times { TunnelUrl.url }
-    assert_equal 1, counter
-  ensure
-    TunnelUrl.providers.delete("counter_provider")
-  end
-
-  def test_caches_nil_result
-    counter = 0
-    TunnelUrl.register("nil_counter") do
-      counter += 1
-      nil
-    end
-    ENV["TUNNEL_PROVIDER"] = "nil_counter"
-    3.times { TunnelUrl.url }
-    assert_equal 1, counter
-  ensure
-    TunnelUrl.providers.delete("nil_counter")
-  end
-
-  def test_reset_clears_cache
-    counter = 0
-    TunnelUrl.register("reset_counter") do
-      counter += 1
-      "https://test.example.com"
-    end
-    ENV["TUNNEL_PROVIDER"] = "reset_counter"
-    TunnelUrl.url
-    TunnelUrl.reset!
-    TunnelUrl.url
-    assert_equal 2, counter
-  ensure
-    TunnelUrl.providers.delete("reset_counter")
-  end
-
-  def test_host_returns_nil_when_no_tunnel
-    ENV["TUNNEL_PROVIDER"] = "none"
+  def test_host_returns_nil_when_url_unset
     assert_nil TunnelUrl.host
   end
 
-  def test_host_extracts_host_from_tunnel_url
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "https://abc.ngrok-free.app"
+  def test_host_returns_parsed_host
+    ENV["TUNNEL_URL"] = "https://abc.ngrok-free.app/some/path"
     assert_equal "abc.ngrok-free.app", TunnelUrl.host
   end
 
-  def test_public_url_options_uses_tunnel_when_present
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "https://abc.ngrok-free.app"
-    opts = TunnelUrl.public_url_options
-    assert_equal({ host: "abc.ngrok-free.app", protocol: "https" }, opts)
+  # base_url
+
+  def test_base_url_assembles_from_default_url_options
+    Rails.application.default_url_options = { host: "example.com", protocol: "https" }
+    assert_equal "https://example.com", TunnelUrl.base_url
   end
 
-  def test_public_url_options_includes_non_default_port
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "http://abc.ngrok-free.app:8080"
-    opts = TunnelUrl.public_url_options
-    assert_equal 8080, opts[:port]
+  def test_base_url_defaults_protocol_to_https
+    Rails.application.default_url_options = { host: "example.com" }
+    assert_equal "https://example.com", TunnelUrl.base_url
   end
 
-  def test_public_url_options_omits_default_port
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "https://abc.ngrok-free.app:443"
-    opts = TunnelUrl.public_url_options
-    refute_includes opts, :port
+  def test_base_url_includes_non_default_port
+    Rails.application.default_url_options = { host: "localhost", protocol: "http", port: 3000 }
+    assert_equal "http://localhost:3000", TunnelUrl.base_url
   end
 
-  def test_public_url_options_falls_back_to_dev_access_url
-    ENV["TUNNEL_PROVIDER"] = "none"
-    ENV["DEV_ACCESS_URL"] = "http://localhost:3000"
-    opts = TunnelUrl.public_url_options
-    assert_equal({ host: "localhost", protocol: "http", port: 3000 }, opts)
+  def test_base_url_omits_default_port
+    Rails.application.default_url_options = { host: "example.com", protocol: "https", port: 443 }
+    assert_equal "https://example.com", TunnelUrl.base_url
   end
 
-  def test_public_url_options_raises_without_fallback
-    ENV["TUNNEL_PROVIDER"] = "none"
-    assert_raises(KeyError) { TunnelUrl.public_url_options }
+  # public_url_options
+
+  def test_public_url_options_falls_back_to_default_url_options_when_tunnel_unset
+    Rails.application.default_url_options = { host: "localhost", protocol: "http", port: 3000 }
+    assert_equal({ host: "localhost", protocol: "http", port: 3000 }, TunnelUrl.public_url_options)
   end
 
-  def test_public_base_url_returns_tunnel_when_present
-    ENV["TUNNEL_PROVIDER"] = "ngrok"
-    ENV["NGROK_URL"] = "https://abc.ngrok-free.app"
+  def test_public_url_options_uses_tunnel_when_set
+    ENV["TUNNEL_URL"] = "https://abc.ngrok-free.app"
+    Rails.application.default_url_options = { host: "localhost", protocol: "http", port: 3000 }
+    assert_equal({ host: "abc.ngrok-free.app", protocol: "https" }, TunnelUrl.public_url_options)
+  end
+
+  def test_public_url_options_includes_non_default_port_from_tunnel
+    ENV["TUNNEL_URL"] = "http://abc.example.com:8080"
+    assert_equal({ host: "abc.example.com", protocol: "http", port: 8080 }, TunnelUrl.public_url_options)
+  end
+
+  def test_public_url_options_omits_default_port_from_tunnel
+    ENV["TUNNEL_URL"] = "https://abc.example.com:443"
+    refute_includes TunnelUrl.public_url_options, :port
+  end
+
+  # public_base_url
+
+  def test_public_base_url_returns_tunnel_when_set
+    ENV["TUNNEL_URL"] = "https://abc.ngrok-free.app"
     assert_equal "https://abc.ngrok-free.app", TunnelUrl.public_base_url
   end
 
-  def test_public_base_url_falls_back_to_dev_access_url
-    ENV["TUNNEL_PROVIDER"] = "none"
-    ENV["DEV_ACCESS_URL"] = "http://localhost:3000"
-    assert_equal "http://localhost:3000", TunnelUrl.public_base_url
-  end
-
-  def test_register_supports_custom_providers
-    TunnelUrl.register(:my_custom) { "https://custom.example.com" }
-    ENV["TUNNEL_PROVIDER"] = "my_custom"
-    assert_equal "https://custom.example.com", TunnelUrl.url
-  ensure
-    TunnelUrl.providers.delete("my_custom")
-  end
-
-  def test_register_normalizes_symbol_and_string_names
-    TunnelUrl.register(:sym_provider) { "from-symbol" }
-    assert TunnelUrl.providers.key?("sym_provider")
-  ensure
-    TunnelUrl.providers.delete("sym_provider")
-  end
-
-  def test_register_requires_block
-    assert_raises(ArgumentError) { TunnelUrl.register(:no_block) }
-  end
-
-  def test_unknown_provider_raises_with_helpful_message
-    ENV["TUNNEL_PROVIDER"] = "bogus_provider_xyz"
-    err = assert_raises(ArgumentError) { TunnelUrl.url }
-    assert_match(/bogus_provider_xyz/, err.message)
-    assert_match(/Registered providers/, err.message)
+  def test_public_base_url_falls_back_to_base_url_when_tunnel_unset
+    Rails.application.default_url_options = { host: "example.com", protocol: "https" }
+    assert_equal "https://example.com", TunnelUrl.public_base_url
   end
 end
