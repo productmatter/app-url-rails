@@ -2,7 +2,7 @@
 
 require "rails/generators"
 
-module AppUrl
+class AppUrl
   module Generators
     class InstallGenerator < Rails::Generators::Base
       DEVELOPMENT_RB = "config/environments/development.rb"
