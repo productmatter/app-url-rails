@@ -2,20 +2,27 @@
 
 require "rails/generators"
 
-module TunnelUrl
+module AppUrl
   module Generators
     class InstallGenerator < Rails::Generators::Base
       DEVELOPMENT_RB = "config/environments/development.rb"
 
       WIRING = <<~RUBY
-        # tunnel-url-rails: outsider-reachable URLs in development.
+        # app-url-rails: dev URL + tunnel URL wiring.
         # Must run at config-time — Rails snapshots config.hosts during initialize!,
         # so adding hosts later (initializer, after_initialize) is silently ignored.
-        if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
-          require "uri"
-          uri = URI(tunnel)
+        require "uri"
+
+        if (dev = ENV["DEV_URL"]) && !dev.empty?
+          uri = URI(dev)
           config.hosts << uri.host
-          routes.default_url_options = { host: uri.host, protocol: uri.scheme }
+          opts = { host: uri.host, protocol: uri.scheme }
+          opts[:port] = uri.port unless uri.port == uri.default_port
+          Rails.application.default_url_options = opts
+        end
+
+        if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
+          config.hosts << URI(tunnel).host
         end
       RUBY
 
@@ -25,8 +32,9 @@ module TunnelUrl
           return
         end
 
-        if File.read(DEVELOPMENT_RB).include?("TUNNEL_URL")
-          say_status :skip, "#{DEVELOPMENT_RB} already references TUNNEL_URL", :yellow
+        contents = File.read(DEVELOPMENT_RB)
+        if contents.include?("DEV_URL") || contents.include?("TUNNEL_URL")
+          say_status :skip, "#{DEVELOPMENT_RB} already references DEV_URL or TUNNEL_URL", :yellow
           return
         end
 

@@ -18,5 +18,5 @@ What you expected to happen.
 **Environment**
 - Ruby version:
 - Rails version:
-- `tunnel-url-rails` version:
+- `app-url-rails` version:
 - Tunnel provider (ngrok, Cloudflare Tunnel, etc.):
