@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
                      "exposes a small API (url, host, base_url, public_url_options, public_base_url) " \
                      "for building public URLs at request time — tunnel preferred, falling back to " \
                      "Rails.application.default_url_options."
-  spec.homepage = "https://github.com/jonathansimmons/tunnel-url-rails"
+  spec.homepage = "https://github.com/productmatter/tunnel-url-rails"
   spec.license = "Apache-2.0"
   spec.required_ruby_version = ">= 3.2.0"
 

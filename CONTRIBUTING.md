@@ -5,7 +5,7 @@ Thanks for considering a contribution. Here's what you need to know.
 ## Setup
 
 ```bash
-git clone https://github.com/jonathansimmons/tunnel-url-rails.git
+git clone https://github.com/productmatter/tunnel-url-rails.git
 cd tunnel-url-rails
 bundle install
 ```
