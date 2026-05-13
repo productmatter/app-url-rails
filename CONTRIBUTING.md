@@ -1,12 +1,12 @@
-# Contributing to tunnel-url-rails
+# Contributing to app-url-rails
 
 Thanks for considering a contribution. Here's what you need to know.
 
 ## Setup
 
 ```bash
-git clone https://github.com/productmatter/tunnel-url-rails.git
-cd tunnel-url-rails
+git clone https://github.com/productmatter/app-url-rails.git
+cd app-url-rails
 bundle install
 ```
 
@@ -16,7 +16,7 @@ Requires Ruby 3.2+.
 
 1. Fork the repo and create a branch from `main`.
 2. Write tests for new behavior.
-3. Run `gem build tunnel-url-rails.gemspec --strict` to validate the gemspec.
+3. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
 4. Open a pull request with a clear description of the change and why it's needed.
 
 ## Pull request expectations

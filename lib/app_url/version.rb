@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
-class TunnelUrl
+class AppUrl
   VERSION = "1.0.0"
 end
