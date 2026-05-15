@@ -47,6 +47,32 @@ class InstallGeneratorTest < Rails::Generators::TestCase
     assert_includes contents, 'ENV["TUNNEL_URL"]'
   end
 
+  def test_wires_action_cable_allowed_request_origins
+    write_development_rb(<<~RUBY)
+      Rails.application.configure do
+        config.cache_classes = false
+      end
+    RUBY
+
+    run_generator
+
+    contents = read_development_rb
+    assert_includes contents, "config.action_cable.allowed_request_origins",
+                    "wiring must extend Action Cable's allowed origins for DEV_URL/TUNNEL_URL"
+    assert_includes contents, "config.respond_to?(:action_cable)",
+                    "cable wiring must be guarded for apps without Action Cable loaded"
+  end
+
+  def test_origin_helper_includes_non_default_port_in_emitted_wiring
+    wiring = AppUrl::Generators::InstallGenerator::WIRING
+    # The lambda must conditionally append :port — bare host won't match the
+    # Origin header a browser sends from http://localhost:3000.
+    assert_includes wiring, "uri.port != uri.default_port",
+                    "origin helper must distinguish default from non-default ports"
+    assert_match(/:\#\{uri\.port\}/, wiring,
+                 "origin helper must interpolate the port when non-default")
+  end
+
   def test_injected_block_is_indented_inside_configure
     write_development_rb(<<~RUBY)
       Rails.application.configure do

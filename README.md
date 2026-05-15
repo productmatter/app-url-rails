@@ -72,11 +72,22 @@ internal and public URLs without manual `.env` edits.
 ## How it works
 
 The install generator inserts the following block inside
-`Rails.application.configure` in `config/environments/development.rb`:
+`Rails.application.configure` in `config/environments/development.rb`. For
+each of `DEV_URL` and `TUNNEL_URL`, it extends the three Rails-side allowlists
+that need to know about your dev URLs:
+
+- `config.hosts` (`ActionDispatch::HostAuthorization`)
+- `Rails.application.default_url_options` (`DEV_URL` only)
+- `config.action_cable.allowed_request_origins`
 
 ```ruby
 # app-url-rails: dev URL + tunnel URL wiring.
 require "uri"
+
+app_url_origin = ->(uri) {
+  port = uri.port && uri.port != uri.default_port ? ":#{uri.port}" : ""
+  "#{uri.scheme}://#{uri.host}#{port}"
+}
 
 if (dev = ENV["DEV_URL"]) && !dev.empty?
   uri = URI(dev)
@@ -84,10 +95,19 @@ if (dev = ENV["DEV_URL"]) && !dev.empty?
   opts = { host: uri.host, protocol: uri.scheme }
   opts[:port] = uri.port unless uri.port == uri.default_port
   Rails.application.default_url_options = opts
+  if config.respond_to?(:action_cable)
+    config.action_cable.allowed_request_origins ||= []
+    config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+  end
 end
 
 if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
-  config.hosts << URI(tunnel).host
+  uri = URI(tunnel)
+  config.hosts << uri.host
+  if config.respond_to?(:action_cable)
+    config.action_cable.allowed_request_origins ||= []
+    config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+  end
 end
 ```
 

@@ -13,16 +13,30 @@ class AppUrl
         # so adding hosts later (initializer, after_initialize) is silently ignored.
         require "uri"
 
+        app_url_origin = ->(uri) {
+          port = uri.port && uri.port != uri.default_port ? ":\#{uri.port}" : ""
+          "\#{uri.scheme}://\#{uri.host}\#{port}"
+        }
+
         if (dev = ENV["DEV_URL"]) && !dev.empty?
           uri = URI(dev)
           config.hosts << uri.host
           opts = { host: uri.host, protocol: uri.scheme }
           opts[:port] = uri.port unless uri.port == uri.default_port
           Rails.application.default_url_options = opts
+          if config.respond_to?(:action_cable)
+            config.action_cable.allowed_request_origins ||= []
+            config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+          end
         end
 
         if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
-          config.hosts << URI(tunnel).host
+          uri = URI(tunnel)
+          config.hosts << uri.host
+          if config.respond_to?(:action_cable)
+            config.action_cable.allowed_request_origins ||= []
+            config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+          end
         end
       RUBY
 
