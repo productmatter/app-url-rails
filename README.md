@@ -69,6 +69,10 @@ For parallel-worktree workflows such as
 can export its own `DEV_URL` and `TUNNEL_URL`, giving every branch distinct
 internal and public URLs without manual `.env` edits.
 
+See [git-treeline and AppUrl Adoption](docs/git-treeline.md) for setup patterns
+with and without git-treeline, the Rails stack touchpoints `AppUrl` can feed,
+and the Action Cable port nuance for router-backed development URLs.
+
 ## How it works
 
 The install generator inserts the following block inside
