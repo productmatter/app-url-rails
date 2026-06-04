@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "uri"
 require "rails/generators"
 require "rails/generators/test_case"
 require_relative "../../../lib/generators/app_url/install_generator"
@@ -63,14 +64,46 @@ class InstallGeneratorTest < Rails::Generators::TestCase
                     "cable wiring must be guarded for apps without Action Cable loaded"
   end
 
-  def test_origin_helper_includes_non_default_port_in_emitted_wiring
+  def test_origin_helper_emits_port_agnostic_regexp
     wiring = AppUrl::Generators::InstallGenerator::WIRING
-    # The lambda must conditionally append :port — bare host won't match the
-    # Origin header a browser sends from http://localhost:3000.
-    assert_includes wiring, "uri.port != uri.default_port",
-                    "origin helper must distinguish default from non-default ports"
-    assert_match(/:\#\{uri\.port\}/, wiring,
-                 "origin helper must interpolate the port when non-default")
+    # Must use a Regexp so ActionCable accepts the WebSocket origin on any port —
+    # tunnels/proxies expose different ports than the configured URL, and an exact
+    # string match silently rejects the cable handshake.
+    assert_includes wiring, "Regexp.escape(uri.scheme)",
+                    "origin regexp must escape the scheme"
+    assert_includes wiring, "Regexp.escape(uri.host)",
+                    "origin regexp must escape the host to prevent suffix spoofing"
+    assert_includes wiring, "(?::\\d+)?",
+                    "origin regexp must allow any port ((?::\\d+)? pattern)"
+    assert_includes wiring, "}i",
+                    "origin regexp should be case-insensitive because origins and URL hosts may differ in case"
+  end
+
+  def test_origin_regexp_matches_same_scheme_host_on_any_port_only
+    app_url_origin = ->(uri) {
+      %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
+    }
+
+    origin = app_url_origin.call(URI("http://Example.test:3000"))
+
+    assert_match origin, "http://example.test"
+    assert_match origin, "http://example.test:3000"
+    assert_match origin, "http://example.test:99999"
+    refute_match origin, "https://example.test:3000"
+    refute_match origin, "http://example.test.evil:3000"
+    refute_match origin, "http://example.test/path"
+  end
+
+  def test_origin_regexp_handles_ipv6_hosts
+    app_url_origin = ->(uri) {
+      %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
+    }
+
+    origin = app_url_origin.call(URI("http://[::1]:3000"))
+
+    assert_match origin, "http://[::1]"
+    assert_match origin, "http://[::1]:3000"
+    refute_match origin, "http://[::1].evil:3000"
   end
 
   def test_injected_block_is_indented_inside_configure

@@ -82,11 +82,14 @@ that need to know about your dev URLs:
 
 ```ruby
 # app-url-rails: dev URL + tunnel URL wiring.
+# Must run at config-time — Rails snapshots config.hosts during initialize!,
+# so adding hosts later (initializer, after_initialize) is silently ignored.
 require "uri"
 
+# Matches any port — tunnels/proxies expose different ports than the configured URL,
+# and an exact host:port match causes silent ActionCable rejection (broken live updates).
 app_url_origin = ->(uri) {
-  port = uri.port && uri.port != uri.default_port ? ":#{uri.port}" : ""
-  "#{uri.scheme}://#{uri.host}#{port}"
+  %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
 }
 
 if (dev = ENV["DEV_URL"]) && !dev.empty?
