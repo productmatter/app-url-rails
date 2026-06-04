@@ -69,6 +69,10 @@ For parallel-worktree workflows such as
 can export its own `DEV_URL` and `TUNNEL_URL`, giving every branch distinct
 internal and public URLs without manual `.env` edits.
 
+See [git-treeline and AppUrl Adoption](docs/git-treeline.md) for setup patterns
+with and without git-treeline, the Rails stack touchpoints `AppUrl` can feed,
+and the Action Cable port nuance for router-backed development URLs.
+
 ## How it works
 
 The install generator inserts the following block inside
@@ -82,11 +86,14 @@ that need to know about your dev URLs:
 
 ```ruby
 # app-url-rails: dev URL + tunnel URL wiring.
+# Must run at config-time — Rails snapshots config.hosts during initialize!,
+# so adding hosts later (initializer, after_initialize) is silently ignored.
 require "uri"
 
+# Matches any port — tunnels/proxies expose different ports than the configured URL,
+# and an exact host:port match causes silent ActionCable rejection (broken live updates).
 app_url_origin = ->(uri) {
-  port = uri.port && uri.port != uri.default_port ? ":#{uri.port}" : ""
-  "#{uri.scheme}://#{uri.host}#{port}"
+  %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
 }
 
 if (dev = ENV["DEV_URL"]) && !dev.empty?
