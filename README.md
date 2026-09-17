@@ -58,11 +58,27 @@ With neither set, the development environment behaves as it did before
 installing the gem. In production, both are typically unset and `AppUrl`
 resolves entirely from `Rails.application.default_url_options`.
 
+Configure the default explicitly in each environment that needs URLs outside
+an incoming request, for example:
+
+```ruby
+# config/environments/production.rb, inside Rails.application.configure
+Rails.application.default_url_options = { host: "example.com", protocol: "https" }
+```
+
+`AppUrl` does not infer the host from the current request or read
+`config.action_mailer.default_url_options`. Without a configured host,
+`AppUrl.host` and `AppUrl.base_url` return `nil`.
+
 ## Development tunnels
 
-`AppUrl` reads `TUNNEL_URL` from the environment at request time. Any tunnel
-provider works: ngrok, Cloudflare Tunnel, Tailscale Funnel, a custom reverse
-proxy.
+`AppUrl` reads `TUNNEL_URL` from the environment each time a public helper is
+called. Any tunnel provider works: ngrok, Cloudflare Tunnel, Tailscale Funnel,
+a custom reverse proxy.
+
+Use absolute HTTP(S) URLs, such as `http://localhost:3000` and
+`https://example.ngrok-free.app`. Restart Rails after changing these environment
+variables so the development host and Action Cable configuration are refreshed.
 
 For parallel-worktree workflows such as
 [git-treeline](https://github.com/git-treeline/git-treeline), each workspace

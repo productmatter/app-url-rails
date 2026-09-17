@@ -16,8 +16,9 @@ Requires Ruby 3.2+.
 
 1. Fork the repo and create a branch from `main`.
 2. Write tests for new behavior.
-3. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
-4. Open a pull request with a clear description of the change and why it's needed.
+3. Run `bundle exec rake test` to exercise the URL helpers and install generator.
+4. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
+5. Open a pull request with a clear description of the change and why it's needed.
 
 ## Pull request expectations
 
