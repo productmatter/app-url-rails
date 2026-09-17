@@ -5,7 +5,7 @@ source "https://rubygems.org"
 gemspec
 
 group :test do
-  gem "minitest", "~> 5.27"
+  gem "minitest", "~> 6.0"
   gem "railties", ">= 7.0"
   gem "rake", "~> 13.0"
 end
