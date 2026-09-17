@@ -81,6 +81,16 @@ class AppUrlTest < Minitest::Test
     assert_equal "http://localhost:3000", AppUrl.base_url
   end
 
+  def test_base_url_defaults_protocol_to_https_when_blank
+    Rails.application.default_url_options = { host: "example.com", protocol: "" }
+    assert_equal "https://example.com", AppUrl.base_url
+  end
+
+  def test_base_url_accepts_protocol_with_doubled_colon
+    Rails.application.default_url_options = { host: "localhost", protocol: "http::", port: 3000 }
+    assert_equal "http://localhost:3000", AppUrl.base_url
+  end
+
   def test_base_url_includes_non_default_port
     Rails.application.default_url_options = { host: "localhost", protocol: "http", port: 3000 }
     assert_equal "http://localhost:3000", AppUrl.base_url

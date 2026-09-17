@@ -17,7 +17,9 @@ class AppUrl
       opts = Rails.application.default_url_options
       return nil unless opts[:host]
 
-      scheme = (opts[:protocol] || "https").sub(/:\/\/\z|:\z/, "")
+      scheme = opts[:protocol].to_s
+      scheme = "https" if scheme.empty?
+      scheme = scheme.sub(/:+(\/\/)?\z/, "")
       uri = URI("#{scheme}://#{opts[:host]}")
       uri.port = opts[:port] if opts[:port] && opts[:port] != uri.default_port
       uri.to_s
