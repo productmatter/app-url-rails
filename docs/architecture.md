@@ -2,9 +2,10 @@
 
 `app-url-rails` is a Ruby gem that gives Rails applications one API for their
 configured address and an optional externally reachable address. `AppUrl` reads
-`Rails.application.default_url_options` and `TUNNEL_URL`; its public helpers fall
-back to the configured address when the tunnel override is absent. It does not
-infer request hosts or read Action Mailer's separate URL defaults.
+`Rails.application.default_url_options` and `TUNNEL_URL`. Public host, options,
+and base-URL helpers fall back to the configured address when the override is
+absent; `public_url` returns the validated original tunnel string or `nil`.
+It does not infer request hosts or read Action Mailer's separate URL defaults.
 
 The install generator writes a versioned marker and an explicit
 `AppUrl.configure_development!(config)` call. That method validates `DEV_URL` and

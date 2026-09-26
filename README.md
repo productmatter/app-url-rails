@@ -27,6 +27,8 @@ AppUrl.configure_development!(config)
 
 The marker identifies the installation format, so gem releases can improve the
 implementation without replacing application-owned configuration.
+Existing 1.x installations need the [one-time upgrade](#upgrading-from-1x) below;
+rerunning the generator does not migrate copied wiring.
 
 ## Usage
 
@@ -145,6 +147,12 @@ existing allowlists and unrelated URL options, and repeated calls do not add
 duplicates. The public helpers read `TUNNEL_URL` on demand, but boot-time host
 and Action Cable wiring requires a restart after environment changes.
 
+In 1.x, the generator copied the parsing and wiring implementation into each
+application. In 2.0, the application keeps the explicit call and the gem supplies
+the implementation. After the one-time migration, wiring fixes arrive through
+gem upgrades. The existing default/public helper names and their purposes remain
+the same.
+
 `AppUrl.base_url` delegates protocol and origin construction to Rails. An
 omitted protocol follows Rails' effective default, including HTTPS when
 `force_ssl` is enabled. Configured protocol spellings follow Rails, including
@@ -175,24 +183,42 @@ Version 2.0 changes these contracts:
   `public_url` for the valid input's original spelling.
 - `public_url_options` includes the tunnel's effective port, preventing route
   helpers from inheriting the development application's port.
-- Supported Rails lines are now 8.0 and 8.1, replacing the unverified 7.0+ claim.
+- Rails 7 support is retained and tested alongside Rails 8. Ruby 3.2 remains
+  the minimum supported Ruby version.
 
-The 2.0 installer does not rewrite copied application code. For a one-time
-manual migration, open `config/environments/development.rb` and remove only the
-complete old generated wiring: its helper plus the `DEV_URL` and `TUNNEL_URL`
-branches. Preserve custom configuration around it. Add the supported call and
-marker in the configure block:
+The 2.0 installer does not rewrite copied application code. Upgrade an existing
+app once:
+
+1. Update the app's Gemfile constraint to allow 2.0 (for example,
+   `gem "app-url-rails", "~> 2.0"`), then run `bundle update app-url-rails`.
+2. In `config/environments/development.rb`, remove only the complete old generated
+   wiring: its `app_url_origin` helper and the `DEV_URL` and `TUNNEL_URL` branches.
+   Preserve custom configuration around it. If the app never installed that
+   block, there is no copied wiring to remove.
+3. Add the marker and setup call below inside the configure block. Put mailer
+   assignments that consume `AppUrl.url_options` after this call.
 
 ```ruby
-# app-url-rails: configuration v1
-AppUrl.configure_development!(config)
+Rails.application.configure do
+  # app-url-rails: configuration v1
+  AppUrl.configure_development!(config)
+end
 ```
 
-Boot the app and verify its development URLs. If the old block is partial,
-customized, ambiguous, or conflicts with the marker, resolve it manually; the
-installer exits non-zero with an actionable diagnostic and leaves the file
-unchanged. A recognized v1 installation is a verified no-op. Once migrated,
-future gem upgrades use the existing call and do not replace it.
+4. Check the behavior changes above: environment URLs must be HTTP(S) origins,
+   and set an explicit protocol if the app relied on the old HTTPS default.
+5. Restart Rails and verify generated application/public URLs, host access, and
+   Cable connections if used. Rerunning `bin/rails g app_url:install` after the
+   replacement verifies the current installation and leaves it unchanged.
+
+If the old block is partial, customized, ambiguous, or conflicts with the marker,
+resolve it manually; the installer exits non-zero with an actionable diagnostic
+and leaves the file unchanged. No migration script is needed: the migration is
+replacing application configuration, and automatic rewriting could discard app
+customizations. Once migrated, future gem upgrades use the existing call.
+
+Apps using only URL helpers can continue without installing development setup;
+the helper behavior changes above still apply.
 
 ## Known limitations
 
@@ -222,12 +248,14 @@ Rails.application.config.session_store :cookie_store,
 
 ## Requirements
 
-AppUrl 2.0 is a breaking release targeting:
+AppUrl 2.0 is a breaking release with these requirements:
 
 - Ruby >= 3.2 (tested on Ruby 3.2 and 3.4)
-- Rails 8.0 and 8.1 (per-line Gemfiles in `gemfiles/`)
+- Rails >= 7.0 (tested on Rails 7.0, 7.1, 7.2, 8.0, and 8.1)
 
-The gem declares Action Pack and Railties dependencies within those Rails lines.
+The gem declares Action Pack and Railties dependencies without a speculative
+upper bound. Per-line Gemfiles in `gemfiles/` define the tested matrix; newer
+Rails versions are allowed but need verification before being listed as tested.
 
 ## Contributing
 

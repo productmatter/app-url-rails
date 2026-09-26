@@ -142,11 +142,12 @@ failures, and reliable installation without changing developer-owned wiring.
 
 ## Assumptions
 
-- The 2.0 matrix is Rails 8.0 and 8.1, each on Ruby 3.2 and 3.4, with matching
-  Action Cable dependencies and per-line Gemfiles. This adopts the recommended
-  maintained-line default during the authorized build; client inventory can
-  extend it by agreement. The previous unverified Rails 7.0+ claim is replaced
-  by the explicit tested lines. Record exact patch versions with test results.
+- Jonathan requested Rails 7 compatibility: the 2.0 matrix is Rails 7.0, 7.1,
+  7.2, 8.0, and 8.1, each on Ruby 3.2 and 3.4, with matching Action Cable and
+  Action Mailer test dependencies and per-line Gemfiles. Runtime dependencies
+  permit Rails 7.0+ without a speculative upper bound. Tested versions are
+  evidence, not a reason to block untested newer releases. Record exact patch
+  versions with test results. The existing Ruby 3.2 minimum remains unchanged.
 - Rails owns effective protocol defaults and initialization order. Verify with
   `force_ssl` both enabled and disabled on the agreed matrix. If behavior differs
   by version, bring the compatibility choice back rather than invent workarounds.
@@ -221,8 +222,8 @@ failures, and reliable installation without changing developer-owned wiring.
 ### human-gate
 
 - Jonathan approved the revised contract and implementation on 2026-09-26.
-  The support matrix follows the recommended default, subject to any client
-  compatibility requirements raised during this attended build.
+  He subsequently requested retaining Rails 7 support; the expanded matrix
+  above supersedes the initial Rails 8-only testing choice.
 - Jonathan accepts the resulting gem behavior and evidence. Whether to pursue
   Rails or publish a release remains a separate decision.
 

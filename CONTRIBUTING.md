@@ -10,7 +10,7 @@ cd app-url-rails
 bundle install
 ```
 
-Requires Ruby 3.2+. The AppUrl 2.0 test matrix is Rails 8.0 and 8.1 on
+Requires Ruby 3.2+. The AppUrl 2.0 test matrix is Rails 7.0, 7.1, 7.2, 8.0, and 8.1 on
 Ruby 3.2 and 3.4, with one Gemfile per Rails line.
 
 ## Making changes
@@ -20,13 +20,19 @@ Ruby 3.2 and 3.4, with one Gemfile per Rails line.
 3. Run the test suite for each supported Rails line:
 
    ```bash
+   BUNDLE_GEMFILE=gemfiles/rails_7_0.gemfile bundle install
+   LC_ALL=C BUNDLE_GEMFILE=gemfiles/rails_7_0.gemfile bundle exec rake test
+   BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle install
+   LC_ALL=C BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle exec rake test
+   BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle install
+   LC_ALL=C BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle exec rake test
    BUNDLE_GEMFILE=gemfiles/rails_8_0.gemfile bundle install
-   BUNDLE_GEMFILE=gemfiles/rails_8_0.gemfile bundle exec rake test
+   LC_ALL=C BUNDLE_GEMFILE=gemfiles/rails_8_0.gemfile bundle exec rake test
    BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle install
-   BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake test
+   LC_ALL=C BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake test
    ```
 
-   Repeat on Ruby 3.2 and Ruby 3.4; CI exercises all four combinations. The
+   Repeat on Ruby 3.2 and Ruby 3.4; CI exercises all ten combinations. The
    integration tests boot isolated apps without a database or network listener.
    CI sets `LC_ALL=C` to catch locale-sensitive fixture reads. Matrix lockfiles
    remain untracked so dependency resolution tests current patches within each
