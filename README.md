@@ -1,6 +1,6 @@
 # app-url-rails
 
-[![Gem Version](https://img.shields.io/gem/v/app-url-rails.svg)](https://rubygems.org/gems/app-url-rails)
+[![GitHub Release](https://img.shields.io/github/v/release/productmatter/app-url-rails)](https://github.com/productmatter/app-url-rails/releases)
 [![CI](https://github.com/productmatter/app-url-rails/actions/workflows/main.yml/badge.svg)](https://github.com/productmatter/app-url-rails/actions/workflows/main.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE.txt)
 
@@ -21,10 +21,18 @@ gem, install generator, Treeline URL allocation, and Action Cable work together.
 
 ## Installation
 
-Add the gem and run the generator once:
+Install from the GitHub release tag by adding this to your Gemfile:
+
+```ruby
+gem "app-url-rails", git: "https://github.com/productmatter/app-url-rails.git", tag: "v2.0.0"
+```
+
+The Git tag works with Bundler without a RubyGems publication. Keep the gem
+available in every environment where application code calls `AppUrl`.
+Then install dependencies and run the generator once:
 
 ```sh
-bundle add app-url-rails
+bundle install
 bin/rails g app_url:install
 ```
 
@@ -100,6 +108,14 @@ The setup call is explicit and has no environment gate: it works in any Rails
 environment where the application calls it, while the generator installs it in
 development only. Requiring the gem alone does not configure an application;
 the gem has no Railtie or automatic hook.
+
+The runtime URL helpers are supported in development, test, and production,
+independently of the setup call. Production applications own their Rails URL
+defaults and normally leave `DEV_URL` and `TUNNEL_URL` unset. Without a tunnel,
+`public_host`, `public_url_options`, and `public_base_url` use those defaults;
+`public_url` returns `nil`. A configured `TUNNEL_URL` overrides the public
+helpers in every environment, so set it in production only deliberately.
+OAuth callback configuration and webhook validation remain application-owned.
 
 Configure the default explicitly in each environment that needs URLs outside
 an incoming request, for example:
@@ -211,12 +227,16 @@ Version 2.0 changes these contracts:
 The 2.0 installer does not rewrite copied application code. Upgrade an existing
 app once:
 
-1. Update the app's Gemfile constraint to allow 2.0 (for example,
-   `gem "app-url-rails", "~> 2.0"`), then run `bundle update app-url-rails`.
+1. Update the app's Gemfile to use the `v2.0.0` Git tag shown in
+   [Installation](#installation), replacing any previous `ref:` pin, then run
+   `bundle update app-url-rails`.
 2. In `config/environments/development.rb`, remove only the complete old generated
-   wiring: its `app_url_origin` helper and the `DEV_URL` and `TUNNEL_URL` branches.
-   Preserve custom configuration around it. If the app never installed that
-   block, there is no copied wiring to remove.
+   wiring for the `DEV_URL` and `TUNNEL_URL` branches. Remove `app_url_origin`
+   only if no remaining custom configuration calls it. For example, an
+   `OAUTH_BASE_URL` allowlist may still use that helper for Action Cable origins;
+   preserve both the custom block and its helper. Keep application-specific
+   webhook validation as well. If the app never installed the generated block,
+   there is no copied wiring to remove.
 3. Add the marker and setup call below inside the configure block. Put mailer
    assignments that consume `AppUrl.url_options` after this call.
 
