@@ -1,4 +1,8 @@
 /.bundle/
+**/vendor/bundle/
 /tmp/
+/test/tmp/
 *.gem
 Gemfile.lock
+!/examples/worktree_app/Gemfile.lock
+gemfiles/*.lock

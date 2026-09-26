@@ -1,0 +1,8 @@
+/.bundle/
+/.env*
+!/Gemfile.lock
+/log/
+/tmp/
+/config/master.key
+/config/credentials.yml.enc
+/config/credentials/

@@ -1,0 +1,125 @@
+#!/usr/bin/env ruby
+require_relative "../config/boot"
+require "dotenv"
+require "json"
+require "net/http"
+require "openssl"
+require "socket"
+require "timeout"
+require "uri"
+require "websocket/driver"
+
+Dotenv.load(File.expand_path("../.env.local", __dir__), File.expand_path("../.env", __dir__))
+
+class CableProbe
+  attr_reader :url
+
+  def initialize(url)
+    @url = url.to_s
+    @uri = url
+  end
+
+  def write(data)
+    @socket.write(data)
+  end
+
+  def check(origin)
+    result = { welcome: false, echo: false }
+    Timeout.timeout(8) do
+      @socket = Socket.tcp(@uri.hostname, @uri.port, connect_timeout: 5)
+      if @uri.scheme == "wss"
+        context = OpenSSL::SSL::SSLContext.new
+        context.set_params
+        context.ca_file = ENV["SSL_CERT_FILE"] if ENV["SSL_CERT_FILE"]
+        ssl = OpenSSL::SSL::SSLSocket.new(@socket, context)
+        ssl.sync_close = true
+        ssl.hostname = @uri.hostname
+        ssl.connect
+        ssl.post_connection_check(@uri.hostname)
+        @socket = ssl
+      end
+      driver = WebSocket::Driver.client(self, protocols: ["actioncable-v1-json"])
+      driver.set_header("Origin", origin)
+      identifier = JSON.generate(channel: "DiagnosticsChannel")
+      driver.on(:error) { |error| result[:error] = error.message }
+      driver.on(:close) { result[:closed] = true }
+      driver.on(:message) do |event|
+        data = JSON.parse(event.data)
+        case data["type"]
+        when "welcome"
+          result[:welcome] = true
+          driver.text(JSON.generate(command: "subscribe", identifier: identifier))
+        when "confirm_subscription"
+          driver.text(JSON.generate(command: "message", identifier: identifier,
+                                    data: JSON.generate(action: "echo", message: "worktree-check")))
+        end
+        result[:echo] = true if data["identifier"] == identifier && data.dig("message", "echo") == "worktree-check"
+      end
+      driver.start
+      driver.parse(@socket.readpartial(8192)) until result[:echo] || result[:error] || result[:closed]
+      result[:status] = driver.status
+    end
+    result
+  ensure
+    @socket&.close
+  end
+end
+
+def check(condition, label)
+  abort "FAIL: #{label}" unless condition
+  puts "PASS: #{label}"
+end
+
+def get(url, host: nil)
+  http = Net::HTTP.new(url.hostname, url.port, nil)
+  http.use_ssl = url.scheme == "https"
+  http.ca_file = ENV["SSL_CERT_FILE"] if ENV["SSL_CERT_FILE"]
+  http.open_timeout = 5
+  http.read_timeout = 8
+  request = Net::HTTP::Get.new(url.request_uri)
+  request["Host"] = host if host
+  http.request(request)
+end
+
+def origin(value)
+  uri = URI(value)
+  "#{uri.scheme}://#{uri.host}#{":#{uri.port}" unless uri.port == uri.default_port}"
+end
+
+local = URI("http://127.0.0.1:#{ENV.fetch("PORT", "3000")}")
+base = URI(ENV.fetch("VERIFY_URL", local.to_s))
+response = get(URI.join(base.to_s, "/diagnostics"))
+check(response.code == "200", "diagnostics reached over #{base}")
+data = JSON.parse(response.body)
+check(get(URI.join(base.to_s, "/")).code == "200", "home page rendered")
+check(get(URI.join(base.to_s, "/callback")).code == "200", "named callback route reached")
+check(data.fetch("app_url_source") == File.expand_path("../../..", __dir__), "AppUrl loaded from this repository")
+check(!data["dev_url"].to_s.empty?, "DEV_URL is configured")
+expected = origin(data.fetch("dev_url"))
+check(data.fetch("base_url") == expected, "configured base URL is #{expected}")
+check(data.fetch("callback_url") == "#{expected}/callback", "Rails route defaults match DEV_URL")
+tunnel_url = data["tunnel_url"] unless data["tunnel_url"].to_s.empty?
+public_expected = tunnel_url ? origin(tunnel_url) : expected
+check(data.fetch("public_base_url") == public_expected, "public base URL matches configured override or fallback")
+check(data.fetch("public_callback_url") == "#{public_expected}/callback", "public route options match the public base")
+
+canonical = URI(expected)
+check(get(URI.join(local.to_s, "/diagnostics"), host: canonical.host).code == "200", "configured development host accepted")
+["#{canonical.host}.evil", "unrelated.example"].each do |host|
+  check(get(URI.join(local.to_s, "/diagnostics"), host: host).code == "403", "unconfigured host rejected: #{host}")
+end
+
+cable_url = URI.join(base.to_s, "/cable")
+cable_url.scheme = cable_url.scheme == "https" ? "wss" : "ws"
+[expected, "#{canonical.scheme}://#{canonical.host}:3001",
+ tunnel_url && origin(tunnel_url)].compact.uniq.each do |allowed|
+  result = CableProbe.new(cable_url).check(allowed)
+  check(result[:status] == 101 && result[:welcome] && result[:echo], "Cable welcome and echo for #{allowed}: #{result}")
+end
+wrong_scheme = canonical.scheme == "https" ? "http" : "https"
+["#{canonical.scheme}://#{canonical.host}.evil", "#{wrong_scheme}://#{canonical.host}",
+ "https://unrelated.example"].each do |rejected|
+  result = CableProbe.new(cable_url).check(rejected)
+  check([403, 404].include?(result[:status]) && !result[:welcome], "Cable rejected origin #{rejected}")
+end
+puts "All live checks passed."

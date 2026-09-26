@@ -1,0 +1,11 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+gem "actioncable", "~> 7.2.0"
+gem "actionmailer", "~> 7.2.0", require: false
+gem "minitest", "~> 5.0"
+gem "railties", "~> 7.2.0", ">= 7.2.4"
+gem "rake", "~> 13.0"

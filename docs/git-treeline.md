@@ -76,16 +76,53 @@ The intended flow is:
   -> app call sites
 ```
 
-The install generator wires the config-time layer:
+The install generator adds this explicit config-time call in
+`config/environments/development.rb`:
+
+```ruby
+# app-url-rails: configuration v1
+AppUrl.configure_development!(config)
+```
+
+The gem owns the wiring behind the call:
 
 - `config.hosts` gets the `DEV_URL` host and, when set, the `TUNNEL_URL` host.
 - `Rails.application.default_url_options` is derived from `DEV_URL`.
 - `config.action_cable.allowed_request_origins` accepts the `DEV_URL` and
   `TUNNEL_URL` scheme/host on any port in development.
 
+The supported call location is the environment configure block, before Rails
+builds host middleware and applies Action Cable configuration. An appropriately
+ordered initializer can run early enough; `config.after_initialize` is too late
+for host wiring.
+The gem has no Railtie or automatic hook, and the explicit call works in any
+environment where the application invokes it. The generator installs it in
+development only.
+
 The generator does not know which URLs in your app are internal versus
 outsider-facing. Engineers still need to map app call sites to the correct
 `AppUrl` helper.
+
+Both environment URLs must be absolute `http` or `https` origins with a host,
+an optional port from 1 through 65535, and at most a trailing slash. Userinfo,
+paths, queries, fragments, unsupported schemes, missing hosts, invalid ports,
+and whitespace-only values raise `AppUrl::ConfigurationError < ArgumentError`
+when the setup call validates both values before changing Rails configuration.
+Public helpers also validate the tunnel URL in every environment independently
+of setup. Errors report a safe reason without echoing unsafe raw input.
+
+When `DEV_URL` is set, the call updates only the host, protocol, and effective
+port in the existing Rails URL defaults, preserves unrelated options, and
+clears a stale non-default port when the new URL uses its scheme's default.
+`AppUrl.base_url` follows Rails' effective protocol, including `force_ssl`, and
+configured protocol spellings follow Rails. Empty or malformed configured
+protocols raise `ArgumentError`.
+
+All public helpers validate `TUNNEL_URL` when called. `AppUrl.public_url`
+returns the valid value with its original spelling or `nil` without an
+override; it does not fall back. The other public helpers retain their fallback
+to configured application defaults, and `public_base_url` and
+`public_url_options` describe the same normalized origin.
 
 ## App-Level Wiring Checklist
 
@@ -126,6 +163,11 @@ config.action_mailer.default_url_options = AppUrl.url_options
 config.action_mailer.asset_host = AppUrl.public_base_url
 ```
 
+Set mailer defaults after `AppUrl.configure_development!(config)`: setup replaces
+the route-default hash, so an earlier assignment keeps the old values. If you
+call base URL helpers during configuration, configure `protocol:` explicitly;
+Rails applies its `force_ssl` protocol default later during initialization.
+
 When in doubt, ask who clicks or calls the URL:
 
 - Developer's browser in this Rails session: use `AppUrl.url_options` or
@@ -157,9 +199,9 @@ Set `TUNNEL_URL` only when an outside service needs to reach your local app.
 TUNNEL_URL=https://your-subdomain.ngrok-free.app
 ```
 
-Restart Rails after changing `DEV_URL` or `TUNNEL_URL`. The install generator
-adds hosts and Action Cable origins during Rails configuration, so boot-time
-values matter.
+Restart Rails after changing `DEV_URL` or `TUNNEL_URL`. Public helpers read the
+tunnel value on demand, but hosts and Action Cable origins are configured at
+boot.
 
 ## With git-treeline
 
@@ -236,21 +278,26 @@ known origins unless they deliberately want same-host-any-port behavior.
 When installing `app-url-rails` in another Rails app:
 
 1. Add the gem and run `bin/rails g app_url:install`.
-2. Confirm the app loads its dev env file before Rails environment config runs.
-3. If `.treeline.yml` exists, ensure it writes `DEV_URL: "{router_url}"` and,
+2. Confirm the generated `# app-url-rails: configuration v1` marker and
+   `AppUrl.configure_development!(config)` call are inside the configure block.
+3. Confirm the app loads its dev env file before Rails environment config runs.
+4. If `.treeline.yml` exists, ensure it writes `DEV_URL: "{router_url}"` and,
    when useful, `TUNNEL_URL: "{tunnel_url}"`.
-4. Without git-treeline, set `PORT` and `DEV_URL` manually in the app's dev env
+5. Without git-treeline, set `PORT` and `DEV_URL` manually in the app's dev env
    file.
-5. Search app call sites with the command in "App-Level Wiring Checklist".
-6. Use `AppUrl.url_options` or `AppUrl.base_url` for internal/browser-facing links.
-7. Use `AppUrl.public_url_options` or `AppUrl.public_base_url` only for outsider-facing links.
-8. Restart Rails after changing `DEV_URL` or `TUNNEL_URL`.
+6. Search app call sites with the command in "App-Level Wiring Checklist".
+7. Use `AppUrl.url_options` or `AppUrl.base_url` for internal/browser-facing links.
+8. Use `AppUrl.public_url_options` or `AppUrl.public_base_url` only for outsider-facing links.
+9. Restart Rails after changing `DEV_URL` or `TUNNEL_URL`.
 
 ## Generator Scope
 
 The install generator intentionally limits itself to
-`config/environments/development.rb`. That file is safe to update because every
-app needs the same config-time host, default URL, and Action Cable wiring.
+`config/environments/development.rb` and writes an explicit setup call plus its
+format marker. It does not copy a wiring algorithm into the app, rewrite
+legacy/custom blocks, or add a Railtie. A complete legacy block requires the
+documented one-time manual migration; partial or conflicting wiring fails
+non-zero without changing the file.
 
 The generator should not automatically rewrite mailers, jobs, serializers,
 OAuth metadata, webhook clients, or notification services. Those call sites are

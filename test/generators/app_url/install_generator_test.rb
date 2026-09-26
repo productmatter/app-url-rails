@@ -1,191 +1,447 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "minitest/autorun"
-require "uri"
-require "rails/generators"
-require "rails/generators/test_case"
-require_relative "../../../lib/generators/app_url/install_generator"
+require "open3"
+require "rbconfig"
+require "tmpdir"
 
-class InstallGeneratorTest < Rails::Generators::TestCase
-  tests AppUrl::Generators::InstallGenerator
-  destination File.expand_path("../../tmp/generator", __dir__)
+class InstallGeneratorTest < Minitest::Test
+  REPOSITORY_ROOT = File.expand_path("../../..", __dir__)
+  DEVELOPMENT_RB = "config/environments/development.rb"
+  MARKER = "# app-url-rails: configuration v1"
+  CALL = "AppUrl.configure_development!(config)"
+  GENERATOR_COMMAND = [
+    RbConfig.ruby,
+    "-rbundler/setup",
+    "-I#{File.join(REPOSITORY_ROOT, "lib")}",
+    "-e",
+    <<~'RUBY'
+      require "rails/generators"
+      require "generators/app_url/install_generator"
+      Rails::Generators.invoke("app_url:install")
+    RUBY
+  ].freeze
 
-  setup :prepare_destination
+  LEGACY_WIRING = <<~'RUBY'
+      # app-url-rails: dev URL + tunnel URL wiring.
+      # Must run at config-time — Rails snapshots config.hosts during initialize!,
+      # so adding hosts later (initializer, after_initialize) is silently ignored.
+      require "uri"
 
-  def write_development_rb(body)
-    FileUtils.mkdir_p(File.join(destination_root, "config/environments"))
-    File.write(File.join(destination_root, "config/environments/development.rb"), body)
+      # Matches any port — tunnels/proxies expose different ports than the configured URL,
+      # and an exact host:port match causes silent ActionCable rejection (broken live updates).
+      app_url_origin = ->(uri) {
+        %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
+      }
+
+      if (dev = ENV["DEV_URL"]) && !dev.empty?
+        uri = URI(dev)
+        config.hosts << uri.host
+        opts = { host: uri.host, protocol: uri.scheme }
+        opts[:port] = uri.port unless uri.port == uri.default_port
+        Rails.application.default_url_options = opts
+        if config.respond_to?(:action_cable)
+          config.action_cable.allowed_request_origins ||= []
+          config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+        end
+      end
+
+      if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
+        uri = URI(tunnel)
+        config.hosts << uri.host
+        if config.respond_to?(:action_cable)
+          config.action_cable.allowed_request_origins ||= []
+          config.action_cable.allowed_request_origins << app_url_origin.call(uri)
+        end
+      end
+  RUBY
+
+  EMITTED_LEGACY_WIRING = "\n" + LEGACY_WIRING.lines.map do |line|
+    line.strip.empty? ? line : "  #{line}"
+  end.join
+
+  def setup
+    @app_root = Dir.mktmpdir("app-url-generator-")
   end
 
-  def read_development_rb
-    File.read(File.join(destination_root, "config/environments/development.rb"))
+  def teardown
+    FileUtils.remove_entry(@app_root)
   end
 
-  # The generator reads/writes config/environments/development.rb via relative
-  # path, expecting to be run from the Rails app root. Mirror that for tests.
-  def run_generator(args = [])
-    Dir.chdir(destination_root) { super }
-  end
-
-  def test_generator_is_discoverable_by_rails_generators_lookup
-    Rails::Generators.invoke("app_url:install", [], destination_root: destination_root)
-    refute_nil Rails::Generators.find_by_namespace("app_url:install"),
-               "Rails should find the generator at lib/generators/app_url/install_generator.rb"
-  end
-
-  def test_injects_wiring_into_configure_block
-    write_development_rb(<<~RUBY)
+  def test_clean_install_inserts_current_format_at_start_of_configure_block
+    path = development_file(<<~RUBY)
       Rails.application.configure do
         config.cache_classes = false
       end
     RUBY
 
-    run_generator
+    stdout, stderr, status = run_generator
 
-    contents = read_development_rb
-    assert_includes contents, "app-url-rails: dev URL + tunnel URL wiring."
-    assert_includes contents, 'ENV["DEV_URL"]'
-    assert_includes contents, 'ENV["TUNNEL_URL"]'
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_equal <<~RUBY, File.binread(path)
+      Rails.application.configure do
+        #{MARKER}
+        #{CALL}
+        config.cache_classes = false
+      end
+    RUBY
   end
 
-  def test_wires_action_cable_allowed_request_origins
-    write_development_rb(<<~RUBY)
+  def test_installation_leaves_other_environment_files_unchanged
+    development_file("Rails.application.configure do\nend\n")
+    other_environments = %w[test production].to_h do |environment|
+      path = File.join(@app_root, "config/environments/#{environment}.rb")
+      contents = "Rails.application.configure do\n  config.eager_load = #{environment == 'production'}\nend\n"
+      File.binwrite(path, contents)
+      [path, contents]
+    end
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    other_environments.each { |path, original| assert_equal original, File.binread(path) }
+  end
+
+  def test_bin_rails_discovers_the_generator_through_bundler
+    build_rails_command_app
+    path = development_file("Rails.application.configure do\nend\n")
+
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    installed = "Rails.application.configure do\n  #{MARKER}\n  #{CALL}\nend\n"
+    assert_equal installed, File.binread(path)
+
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/already installed/, stdout)
+    assert_equal installed, File.binread(path)
+
+    unsupported = installed.sub("configuration v1", "configuration v2")
+    File.binwrite(path, unsupported)
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/unsupported app-url-rails configuration marker/, "#{stdout}\n#{stderr}")
+    assert_equal unsupported, File.binread(path)
+  end
+
+  def test_current_installation_is_unchanged_success
+    path = development_file(<<~RUBY)
+      Rails.application.configure do
+        #{MARKER}
+        #{CALL}
+        config.cache_classes = false
+      end
+    RUBY
+    original = File.binread(path)
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/already installed/, stdout)
+    assert_equal original, File.binread(path)
+  end
+
+  def test_second_run_is_a_verified_no_op
+    path = development_file(<<~RUBY)
       Rails.application.configure do
         config.cache_classes = false
       end
     RUBY
 
-    run_generator
+    first_stdout, first_stderr, first_status = run_generator
+    after_first_run = File.binread(path)
+    second_stdout, second_stderr, second_status = run_generator
 
-    contents = read_development_rb
-    assert_includes contents, "config.action_cable.allowed_request_origins",
-                    "wiring must extend Action Cable's allowed origins for DEV_URL/TUNNEL_URL"
-    assert_includes contents, "config.respond_to?(:action_cable)",
-                    "cable wiring must be guarded for apps without Action Cable loaded"
+    assert_equal 0, first_status.exitstatus, failure_message(first_stdout, first_stderr, first_status)
+    assert_equal 0, second_status.exitstatus, failure_message(second_stdout, second_stderr, second_status)
+    assert_equal after_first_run, File.binread(path)
+    assert_equal 1, File.binread(path).scan(MARKER).length
+    assert_equal 1, File.binread(path).scan(CALL).length
   end
 
-  def test_origin_helper_emits_port_agnostic_regexp
-    wiring = AppUrl::Generators::InstallGenerator::WIRING
-    # Must use a Regexp so ActionCable accepts the WebSocket origin on any port —
-    # tunnels/proxies expose different ports than the configured URL, and an exact
-    # string match silently rejects the cable handshake.
-    assert_includes wiring, "Regexp.escape(uri.scheme)",
-                    "origin regexp must escape the scheme"
-    assert_includes wiring, "Regexp.escape(uri.host)",
-                    "origin regexp must escape the host to prevent suffix spoofing"
-    assert_includes wiring, "(?::\\d+)?",
-                    "origin regexp must allow any port ((?::\\d+)? pattern)"
-    assert_includes wiring, "}i",
-                    "origin regexp should be case-insensitive because origins and URL hosts may differ in case"
+  def test_clean_install_preserves_crlf_line_endings
+    path = development_file(
+      "Rails.application.configure do\r\n  config.cache_classes = false\r\nend\r\n"
+    )
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_equal(
+      "Rails.application.configure do\r\n  #{MARKER}\r\n  #{CALL}\r\n" \
+      "  config.cache_classes = false\r\nend\r\n",
+      File.binread(path)
+    )
   end
 
-  def test_origin_regexp_matches_same_scheme_host_on_any_port_only
-    app_url_origin = ->(uri) {
-      %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
+  def test_comments_mentioning_environment_and_method_do_not_count_as_installation
+    path = development_file(<<~RUBY)
+      Rails.application.configure do
+        # DEV_URL and TUNNEL_URL used to be configured here.
+        # A future installer might call AppUrl.configure_development!(config).
+        config.cache_classes = false
+      end
+    RUBY
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    contents = File.binread(path)
+    assert_equal <<~RUBY, contents
+      Rails.application.configure do
+        #{MARKER}
+        #{CALL}
+        # DEV_URL and TUNNEL_URL used to be configured here.
+        # A future installer might call AppUrl.configure_development!(config).
+        config.cache_classes = false
+      end
+    RUBY
+    assert_equal 1, contents.scan(MARKER).length
+  end
+
+  def test_complete_legacy_wiring_fails_with_manual_migration_and_no_change
+    path = development_file("Rails.application.configure do\n#{LEGACY_WIRING}end\n")
+    original = File.binread(path)
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/Legacy app-url-rails wiring detected/, "#{stdout}\n#{stderr}")
+    assert_match(/Migrate it manually once/, "#{stdout}\n#{stderr}")
+    assert_equal original, File.binread(path)
+  end
+
+  def test_emitted_legacy_indentation_and_leading_blank_line_require_manual_migration
+    assert_failure_without_change(
+      "Rails.application.configure do\n#{EMITTED_LEGACY_WIRING}end\n",
+      /Legacy app-url-rails wiring detected.*Migrate it manually once/m
+    )
+  end
+
+  def test_legacy_wiring_with_current_marker_and_call_is_not_a_successful_no_op
+    assert_failure_without_change(
+      "Rails.application.configure do\n  #{MARKER}\n  #{CALL}\n#{EMITTED_LEGACY_WIRING}end\n",
+      /Legacy app-url-rails wiring detected.*Migrate it manually once/m
+    )
+  end
+
+  def test_legacy_wiring_with_only_the_dev_branch_fails_without_changes
+    partial_wiring = EMITTED_LEGACY_WIRING.split('  if (tunnel = ENV["TUNNEL_URL"])', 2).first
+    assert_failure_without_change(
+      "Rails.application.configure do\n#{partial_wiring}end\n",
+      /partial, custom, or misplaced/
+    )
+  end
+
+  def test_partial_environment_wiring_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        if ENV["DEV_URL"]
+          config.hosts << "example.test"
+        end
+      end
+    RUBY
+  end
+
+  def test_custom_env_fetch_wiring_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        host = ENV.fetch("DEV_URL", nil)
+        tunnel = ENV.fetch "TUNNEL_URL"
+      end
+    RUBY
+  end
+
+  def test_setup_call_without_marker_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        #{CALL}
+      end
+    RUBY
+  end
+
+  def test_no_parentheses_setup_call_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        AppUrl.configure_development! config
+      end
+    RUBY
+  end
+
+  def test_top_level_qualified_setup_call_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        ::AppUrl.configure_development!(config)
+      end
+    RUBY
+  end
+
+  def test_nested_setup_call_does_not_count_as_current_installation
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      Rails.application.configure do
+        if false
+          #{MARKER}
+          #{CALL}
+        end
+      end
+    RUBY
+  end
+
+  def test_known_marker_and_call_outside_configure_block_fail
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      #{MARKER}
+      #{CALL}
+      Rails.application.configure do
+        config.cache_classes = false
+      end
+    RUBY
+  end
+
+  def test_misplaced_marker_with_in_block_call_fails
+    assert_failure_without_change(<<~RUBY, /partial, custom, or misplaced/)
+      #{MARKER}
+      Rails.application.configure do
+        #{CALL}
+      end
+    RUBY
+  end
+
+  def test_unknown_format_marker_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /unsupported app-url-rails configuration marker/)
+      Rails.application.configure do
+        # app-url-rails: configuration v2
+        #{CALL}
+      end
+    RUBY
+  end
+
+  def test_missing_development_file_exits_nonzero_without_creating_it
+    stdout, stderr, status = run_generator
+
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/development\.rb not found/, "#{stdout}\n#{stderr}")
+    refute File.exist?(File.join(@app_root, DEVELOPMENT_RB))
+  end
+
+  def test_unsupported_configure_block_shape_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      Rails.application.configure {
+        config.cache_classes = false
+      }
+    RUBY
+  end
+
+  def test_two_configure_blocks_fail_and_are_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      Rails.application.configure do
+        config.cache_classes = false
+      end
+      Rails.application.configure do
+        config.eager_load = false
+      end
+    RUBY
+  end
+
+  def test_configure_block_with_a_parameter_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      Rails.application.configure do |app|
+        app.config.eager_load = false
+      end
+    RUBY
+  end
+
+  def test_nested_standard_configure_block_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      if ENV["WRAP_CONFIG"]
+        Rails.application.configure do
+          config.cache_classes = false
+        end
+      end
+    RUBY
+  end
+
+  def test_invalid_ruby_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /not valid Ruby/)
+      Rails.application.configure do
+        config.cache_classes =
+      end
+    RUBY
+  end
+
+  private
+
+  def build_rails_command_app
+    files = {
+      "bin/rails" => <<~RUBY,
+        APP_PATH = File.expand_path("../config/application", __dir__)
+        require_relative "../config/boot"
+        require "rails/commands"
+      RUBY
+      "config/boot.rb" => "require 'bundler/setup'\n",
+      "config/application.rb" => <<~RUBY,
+        require_relative "boot"
+        require "rails"
+        require "action_controller/railtie"
+        Bundler.require(:default)
+
+        module GeneratorDiscoveryFixture
+          class Application < Rails::Application
+            config.eager_load = false
+            config.logger = Logger.new(IO::NULL)
+            config.secret_key_base = "generator-discovery-fixture"
+          end
+        end
+      RUBY
+      "config/environment.rb" => <<~RUBY
+        require_relative "application"
+        Rails.application.initialize!
+      RUBY
     }
-
-    origin = app_url_origin.call(URI("http://Example.test:3000"))
-
-    assert_match origin, "http://example.test"
-    assert_match origin, "http://example.test:3000"
-    assert_match origin, "http://example.test:99999"
-    refute_match origin, "https://example.test:3000"
-    refute_match origin, "http://example.test.evil:3000"
-    refute_match origin, "http://example.test/path"
+    files.each do |relative_path, contents|
+      path = File.join(@app_root, relative_path)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.binwrite(path, contents)
+    end
   end
 
-  def test_origin_regexp_handles_ipv6_hosts
-    app_url_origin = ->(uri) {
-      %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
+  def run_rails_generator
+    environment = {
+      "BUNDLE_GEMFILE" => Bundler.default_gemfile.to_s,
+      "RAILS_ENV" => "development",
+      "RACK_ENV" => "development",
+      "DEV_URL" => nil,
+      "TUNNEL_URL" => nil
     }
-
-    origin = app_url_origin.call(URI("http://[::1]:3000"))
-
-    assert_match origin, "http://[::1]"
-    assert_match origin, "http://[::1]:3000"
-    refute_match origin, "http://[::1].evil:3000"
+    Open3.capture3(environment, RbConfig.ruby, "bin/rails", "generate", "app_url:install", chdir: @app_root)
   end
 
-  def test_injected_block_is_indented_inside_configure
-    write_development_rb(<<~RUBY)
-      Rails.application.configure do
-        config.cache_classes = false
-      end
-    RUBY
-
-    run_generator
-
-    contents = read_development_rb
-    assert_match(/^  # app-url-rails:/, contents,
-                 "wiring should be indented two spaces to sit inside the configure block")
-    assert_match(/^  require "uri"/, contents)
+  def development_file(contents)
+    path = File.join(@app_root, DEVELOPMENT_RB)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.binwrite(path, contents)
+    path
   end
 
-  def test_injects_directly_after_configure_opener
-    write_development_rb(<<~RUBY)
-      Rails.application.configure do
-        config.cache_classes = false
-      end
-    RUBY
-
-    run_generator
-
-    contents = read_development_rb
-    configure_index = contents.index("Rails.application.configure do")
-    wiring_index = contents.index("app-url-rails:")
-    existing_config_index = contents.index("config.cache_classes")
-    assert wiring_index > configure_index, "wiring must be inside the configure block"
-    assert wiring_index < existing_config_index, "wiring must precede existing config so it runs at config-time"
+  def run_generator
+    Open3.capture3(*GENERATOR_COMMAND, chdir: @app_root)
   end
 
-  def test_idempotent_when_dev_url_already_referenced
-    original = <<~RUBY
-      Rails.application.configure do
-        # already wired: uses ENV["DEV_URL"]
-      end
-    RUBY
-    write_development_rb(original)
+  def assert_failure_without_change(contents, message_pattern)
+    path = development_file(contents)
+    original = File.binread(path)
 
-    run_generator
+    stdout, stderr, status = run_generator
 
-    assert_equal original, read_development_rb,
-                 "generator should skip files already referencing DEV_URL"
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match message_pattern, "#{stdout}\n#{stderr}"
+    assert_equal original, File.binread(path)
   end
 
-  def test_idempotent_when_tunnel_url_already_referenced
-    original = <<~RUBY
-      Rails.application.configure do
-        # already wired: uses ENV["TUNNEL_URL"]
-      end
-    RUBY
-    write_development_rb(original)
-
-    run_generator
-
-    assert_equal original, read_development_rb,
-                 "generator should skip files already referencing TUNNEL_URL"
-  end
-
-  def test_safe_to_rerun
-    write_development_rb(<<~RUBY)
-      Rails.application.configure do
-        config.cache_classes = false
-      end
-    RUBY
-
-    run_generator
-    after_first_run = read_development_rb
-    run_generator
-    after_second_run = read_development_rb
-
-    assert_equal after_first_run, after_second_run,
-                 "running twice should be a no-op on the second invocation"
-  end
-
-  def test_does_not_crash_or_create_files_when_development_rb_missing
-    refute File.exist?(File.join(destination_root, "config/environments/development.rb"))
-    capture(:stderr) { capture(:stdout) { run_generator } }
-    refute File.exist?(File.join(destination_root, "config/environments/development.rb")),
-           "generator must not create development.rb on its own"
+  def failure_message(stdout, stderr, status)
+    "generator exited #{status.exitstatus}\nstdout:\n#{stdout}\nstderr:\n#{stderr}"
   end
 end

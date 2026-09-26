@@ -1,0 +1,68 @@
+<main>
+  <div class="eyebrow">AppUrl / local verification</div>
+  <h1>One worktree. The right address.</h1>
+  <p class="intro">See the addresses Rails generates, then check that a live Cable connection can make the round trip.</p>
+
+  <section class="panel" aria-labelledby="addresses-title">
+    <h2 id="addresses-title">Configured addresses</h2>
+    <p class="muted">These values come from this running application. Restart after changing your environment URLs.</p>
+    <dl>
+      <% { dev_url: "DEV_URL", tunnel_url: "TUNNEL_URL", base_url: "Default base URL", public_base_url: "Public base URL", callback_url: "Named callback URL", public_callback_url: "Public callback URL" }.each do |key, label| %>
+        <div class="row"><dt><%= label %></dt><dd><%= @diagnostics[key].presence || "Not set" %></dd></div>
+      <% end %>
+    </dl>
+  </section>
+
+  <section class="panel" aria-labelledby="cable-title">
+    <h2 id="cable-title">Live Action Cable</h2>
+    <div id="cable-status" class="status" role="status" aria-live="polite">Connecting…</div>
+    <p id="cable-detail" class="muted">Waiting for the server welcome, subscription, and echo.</p>
+    <noscript><p class="muted">Enable JavaScript to run the live WebSocket check.</p></noscript>
+  </section>
+
+  <footer>
+    <span>Rails <%= @diagnostics[:rails_version] %> · AppUrl <%= @diagnostics[:app_url_version] %></span>
+    <span><%= link_to "JSON diagnostics", "/diagnostics" %> · <%= link_to "Visit callback", "/callback" %></span>
+  </footer>
+</main>
+<script>
+  (() => {
+    const status = document.getElementById("cable-status");
+    const detail = document.getElementById("cable-detail");
+    const identifier = JSON.stringify({ channel: "DiagnosticsChannel" });
+    const message = "worktree-check";
+    const url = new URL("/cable", window.location.href);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    let complete = false;
+    const update = (label, description, state) => {
+      status.textContent = label;
+      status.dataset.state = state;
+      detail.textContent = description;
+    };
+    const socket = new WebSocket(url, ["actioncable-v1-json"]);
+    const timeout = setTimeout(() => {
+      update("Connection timed out", "The server did not complete the welcome and echo check.", "error");
+      socket.close();
+    }, 10000);
+    socket.addEventListener("message", (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "welcome") {
+        update("Connected · checking echo", "Server welcome received. Subscribing to the diagnostic channel.", "pending");
+        socket.send(JSON.stringify({ command: "subscribe", identifier }));
+      } else if (data.type === "confirm_subscription") {
+        socket.send(JSON.stringify({ command: "message", identifier, data: JSON.stringify({ action: "echo", message }) }));
+      } else if (data.identifier === identifier && data.message?.echo === message) {
+        complete = true;
+        clearTimeout(timeout);
+        update("Welcome + echo verified", "The server accepted this page’s origin and returned the diagnostic message.", "ok");
+      }
+    });
+    socket.addEventListener("close", () => {
+      clearTimeout(timeout);
+      if (!complete) update("Connection rejected", "Check the configured host and origin, then restart the application.", "error");
+    });
+    socket.addEventListener("error", () => {
+      update("Connection failed", "The WebSocket connection could not be established.", "error");
+    });
+  })();
+</script>
