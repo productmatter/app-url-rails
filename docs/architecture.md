@@ -6,9 +6,11 @@ configured address and an optional externally reachable address. `AppUrl` reads
 back to the configured address when the tunnel override is absent. It does not
 infer request hosts or read Action Mailer's separate URL defaults.
 
-The install generator writes development configuration for `DEV_URL` and
-`TUNNEL_URL`: route URL defaults, allowed hosts, and Action Cable origins when
-Cable is available. The gem currently has no Railtie or boot hook of its own.
+The install generator writes a versioned marker and an explicit
+`AppUrl.configure_development!(config)` call. That method validates `DEV_URL` and
+`TUNNEL_URL` before updating route URL defaults, allowed hosts, and Action Cable
+origins when Cable is available. Legacy copied wiring requires a one-time manual
+migration. The gem has no Railtie or automatic boot hook.
 The helper and generator are two responsibilities in one package. Gem hardening
 and a possible future Rails contribution are separate goals; pursuing the latter
 is Jonathan's decision after the gem is sound.

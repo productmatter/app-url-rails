@@ -18,6 +18,15 @@ bin/rails g app_url:install
 ```
 
 The generator is idempotent and modifies only `config/environments/development.rb`.
+New installations add one explicit call inside the Rails configure block:
+
+```ruby
+# app-url-rails: configuration v1
+AppUrl.configure_development!(config)
+```
+
+The marker identifies the installation format, so gem releases can improve the
+implementation without replacing application-owned configuration.
 
 ## Usage
 
@@ -38,8 +47,9 @@ WebhookClient.register(callback_url: order_callback_url(**AppUrl.public_url_opti
 | `AppUrl.base_url` | Scheme + host + port, e.g. `"https://example.com"` |
 | `AppUrl.public_host` | `TUNNEL_URL` host when set, otherwise `AppUrl.host` |
 | `AppUrl.public_url_options` | Options hash derived from `TUNNEL_URL`, otherwise `AppUrl.url_options` |
-| `AppUrl.public_base_url` | `TUNNEL_URL` when set, otherwise `AppUrl.base_url` |
-| `AppUrl.public_url` | Raw `TUNNEL_URL` value, or `nil` |
+| `AppUrl.public_base_url` | Normalized tunnel origin (no trailing slash/default port), otherwise `AppUrl.base_url` |
+| `AppUrl.public_url` | Validated `TUNNEL_URL` with its original spelling, or `nil` |
+| `AppUrl.configure_development!(config)` | Validates both environment URLs and applies host, route-default, and Cable wiring |
 
 Use the unprefixed methods for internal-facing links (admin pages, in-app
 redirects). Use `public_*` for anything an external system must reach: webhook
@@ -55,8 +65,18 @@ Two environment variables, both optional, both conventionally development-only:
 | `TUNNEL_URL` | Publicly reachable URL for development. Surfaces via `AppUrl.public_*` and is added to `config.hosts`. |
 
 With neither set, the development environment behaves as it did before
-installing the gem. In production, both are typically unset and `AppUrl`
-resolves entirely from `Rails.application.default_url_options`.
+installing the gem. Both values are validated before any Rails configuration is
+changed. When `DEV_URL` is set, the setup updates only the host, protocol, and
+effective port in `Rails.application.default_url_options`, preserving unrelated
+options. A default port also clears a stale non-default `:port`. Existing hosts
+and Action Cable origins remain in place.
+The call overrides earlier address defaults when `DEV_URL` is set; explicit
+configuration written after the call takes precedence over its results.
+
+The setup call is explicit and has no environment gate: it works in any Rails
+environment where the application calls it, while the generator installs it in
+development only. Requiring the gem alone does not configure an application;
+the gem has no Railtie or automatic hook.
 
 Configure the default explicitly in each environment that needs URLs outside
 an incoming request, for example:
@@ -70,15 +90,39 @@ Rails.application.default_url_options = { host: "example.com", protocol: "https"
 `config.action_mailer.default_url_options`. Without a configured host,
 `AppUrl.host` and `AppUrl.base_url` return `nil`.
 
+Put the call in the environment's `Rails.application.configure` block, before
+Rails builds host authorization middleware and applies Action Cable configuration:
+
+```ruby
+# config/environments/development.rb
+Rails.application.configure do
+  # app-url-rails: configuration v1
+  AppUrl.configure_development!(config)
+end
+```
+
+An appropriately ordered initializer can run before middleware construction;
+`config.after_initialize` is too late for host wiring. Calling from the
+environment configure block is the supported timing.
+
 ## Development tunnels
 
 `AppUrl` reads `TUNNEL_URL` from the environment each time a public helper is
 called. Any tunnel provider works: ngrok, Cloudflare Tunnel, Tailscale Funnel,
 a custom reverse proxy.
 
-Use absolute HTTP(S) URLs, such as `http://localhost:3000` and
-`https://example.ngrok-free.app`. Restart Rails after changing these environment
-variables so the development host and Action Cable configuration are refreshed.
+Use absolute HTTP(S) URLs with a host, an optional port from 1 through 65535,
+and an optional trailing slash, such as `http://localhost:3000` and
+`https://example.ngrok-free.app`. Scheme-less values, missing hosts,
+unsupported schemes, userinfo, non-root paths, queries, fragments, invalid
+ports, and whitespace-only values raise
+`AppUrl::ConfigurationError < ArgumentError`. Setup validates both values when
+called. Public helpers validate `TUNNEL_URL` independently in every environment.
+Errors name the setting and failure without echoing unsafe raw input. Unset or
+empty values mean no override.
+Restart Rails after changing these environment variables so boot-time host and
+Action Cable configuration are refreshed; public helpers still read
+`TUNNEL_URL` on demand.
 
 For parallel-worktree workflows such as
 [git-treeline](https://github.com/git-treeline/git-treeline), each workspace
@@ -91,57 +135,59 @@ and the Action Cable port nuance for router-backed development URLs.
 
 ## How it works
 
-The install generator inserts the following block inside
-`Rails.application.configure` in `config/environments/development.rb`. For
-each of `DEV_URL` and `TUNNEL_URL`, it extends the three Rails-side allowlists
-that need to know about your dev URLs:
+The install generator adds the marked setup call shown above. The gem owns the
+parsing and Rails wiring behind that call, including `config.hosts`,
+`Rails.application.default_url_options`, and Action Cable origins. It preserves
+existing allowlists and unrelated URL options, and repeated calls do not add
+duplicates. The public helpers read `TUNNEL_URL` on demand, but boot-time host
+and Action Cable wiring requires a restart after environment changes.
 
-- `config.hosts` (`ActionDispatch::HostAuthorization`)
-- `Rails.application.default_url_options` (`DEV_URL` only)
-- `config.action_cable.allowed_request_origins`
+`AppUrl.base_url` delegates protocol and origin construction to Rails. An
+omitted protocol follows Rails' effective default, including HTTPS when
+`force_ssl` is enabled. Configured protocol spellings follow Rails, including
+`http`, `https`, `http:`, and `https://`. Explicit empty protocols and malformed
+values such as `http::` raise `ArgumentError` rather than being repaired.
+`url_options` remains a passthrough to the application's defaults.
+
+Every public helper validates `TUNNEL_URL` when called. `AppUrl.public_url`
+returns the original valid string or `nil` when no override is set; it does not
+fall back to another URL. The other public helpers retain their documented
+fallback behavior when the override is absent.
+With an override, `public_url_options` includes its effective port, even 80 or
+443, so Rails route helpers cannot inherit a different application port.
+
+## Upgrading from 1.x
+
+Version 2.0 changes these contracts:
+
+- Host-only `base_url` follows Rails' effective protocol instead of always using
+  HTTPS. Set `protocol: "https"` explicitly when that is your intended address.
+- Empty and malformed configured protocols such as `http::` raise Rails'
+  `ArgumentError`; the gem no longer repairs them.
+- Invalid environment addresses raise `AppUrl::ConfigurationError`, including
+  through `public_url`. Path prefixes and other unsupported components are rejected.
+- `public_base_url` normalizes trailing slashes and default ports; use
+  `public_url` for the valid input's original spelling.
+- `public_url_options` includes the tunnel's effective port, preventing route
+  helpers from inheriting the development application's port.
+- Supported Rails lines are now 8.0 and 8.1, replacing the unverified 7.0+ claim.
+
+The 2.0 installer does not rewrite copied application code. For a one-time
+manual migration, open `config/environments/development.rb` and remove only the
+complete old generated wiring: its helper plus the `DEV_URL` and `TUNNEL_URL`
+branches. Preserve custom configuration around it. Add the supported call and
+marker in the configure block:
 
 ```ruby
-# app-url-rails: dev URL + tunnel URL wiring.
-# Must run at config-time — Rails snapshots config.hosts during initialize!,
-# so adding hosts later (initializer, after_initialize) is silently ignored.
-require "uri"
-
-# Matches any port — tunnels/proxies expose different ports than the configured URL,
-# and an exact host:port match causes silent ActionCable rejection (broken live updates).
-app_url_origin = ->(uri) {
-  %r{\A#{Regexp.escape(uri.scheme)}://#{Regexp.escape(uri.host)}(?::\d+)?\z}i
-}
-
-if (dev = ENV["DEV_URL"]) && !dev.empty?
-  uri = URI(dev)
-  config.hosts << uri.host
-  opts = { host: uri.host, protocol: uri.scheme }
-  opts[:port] = uri.port unless uri.port == uri.default_port
-  Rails.application.default_url_options = opts
-  if config.respond_to?(:action_cable)
-    config.action_cable.allowed_request_origins ||= []
-    config.action_cable.allowed_request_origins << app_url_origin.call(uri)
-  end
-end
-
-if (tunnel = ENV["TUNNEL_URL"]) && !tunnel.empty?
-  uri = URI(tunnel)
-  config.hosts << uri.host
-  if config.respond_to?(:action_cable)
-    config.action_cable.allowed_request_origins ||= []
-    config.action_cable.allowed_request_origins << app_url_origin.call(uri)
-  end
-end
+# app-url-rails: configuration v1
+AppUrl.configure_development!(config)
 ```
 
-The wiring must execute during configuration, not in an initializer or
-`config.after_initialize`. `ActionDispatch::HostAuthorization` snapshots
-`config.hosts` during `Rails.application.initialize!`; entries added later are
-silently ignored.
-
-The gem itself ships no Railtie and runs no boot-time code. The class reads
-`Rails.application.default_url_options` and `ENV["TUNNEL_URL"]` on demand.
-Hand-wiring the env vars or host config is equally supported.
+Boot the app and verify its development URLs. If the old block is partial,
+customized, ambiguous, or conflicts with the marker, resolve it manually; the
+installer exits non-zero with an actionable diagnostic and leaves the file
+unchanged. A recognized v1 installation is a verified no-op. Once migrated,
+future gem upgrades use the existing call and do not replace it.
 
 ## Known limitations
 
@@ -167,8 +213,10 @@ Rails.application.config.session_store :cookie_store,
 
 ## Requirements
 
-- Ruby >= 3.2
-- Rails 7.0+
+AppUrl 2.0 is a breaking release targeting:
+
+- Ruby >= 3.2 (tested on Ruby 3.2 and 3.4)
+- Rails 8.0 and 8.1 (per-line Gemfiles in `gemfiles/`)
 
 ## Contributing
 

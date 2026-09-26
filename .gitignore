@@ -1,5 +1,6 @@
 /.bundle/
 /tmp/
+/test/tmp/
 *.gem
 Gemfile.lock
 gemfiles/*.lock

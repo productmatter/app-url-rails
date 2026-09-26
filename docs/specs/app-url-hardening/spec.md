@@ -84,7 +84,9 @@ failures, and reliable installation without changing developer-owned wiring.
 5. **Consistent public addresses and useful errors.** The public override affects
    only public helpers. `public_base_url` and `public_url_options` represent the
    same normalized origin; a trailing slash or explicit default port does not
-   change that origin. IPv6 and non-default ports work. The other public helpers
+   change that origin. Public URL options include the effective tunnel port so
+   Rails route generation cannot inherit an unrelated application port.
+   IPv6 and non-default ports work. The other public helpers
    retain their existing fallback when the override is absent. Errors name the
    setting, the specific failure, and the expected shape. They may include a
    safely reconstructed scheme/host/port, but never echo userinfo, path, query,

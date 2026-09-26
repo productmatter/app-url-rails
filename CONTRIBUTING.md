@@ -10,15 +10,28 @@ cd app-url-rails
 bundle install
 ```
 
-Requires Ruby 3.2+.
+Requires Ruby 3.2+. The AppUrl 2.0 test matrix is Rails 8.0 and 8.1 on
+Ruby 3.2 and 3.4, with one Gemfile per Rails line.
 
 ## Making changes
 
 1. Fork the repo and create a branch from `main`.
 2. Write tests for new behavior.
-3. Run `bundle exec rake test` to exercise the URL helpers and install generator.
+3. Run the test suite for each supported Rails line:
+
+   ```bash
+   BUNDLE_GEMFILE=gemfiles/rails_8_0.gemfile bundle install
+   BUNDLE_GEMFILE=gemfiles/rails_8_0.gemfile bundle exec rake test
+   BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle install
+   BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake test
+   ```
+
+   Repeat on Ruby 3.2 and Ruby 3.4; CI exercises all four combinations. The
+   integration tests boot isolated apps without a database or network listener.
+
 4. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
-5. Open a pull request with a clear description of the change and why it's needed.
+5. Run `specline check .` to validate the documentation structure.
+6. Open a pull request with a clear description of the change and why it's needed.
 
 ## Pull request expectations
 
