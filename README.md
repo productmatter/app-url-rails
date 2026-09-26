@@ -16,6 +16,9 @@ that supplies environment variables before Rails starts: a workspace manager,
 shell script, or container launcher. Install once; each instance uses the
 addresses its environment supplies.
 
+Try the [Rails example](examples/worktree_app/README.md) to see the local
+gem, install generator, Treeline URL allocation, and Action Cable work together.
+
 ## Installation
 
 Add the gem and run the generator once:

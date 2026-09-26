@@ -1,0 +1,14 @@
+project: app_url_rails
+
+env_file: examples/worktree_app/.env.local
+
+env:
+  PORT: "{port}"
+  DEV_URL: "{router_url}"
+  # Set to "{tunnel_url}" only after configuring and verifying a public tunnel.
+  TUNNEL_URL: ""
+
+commands:
+  setup:
+    - cd examples/worktree_app && bundle install
+  start: cd examples/worktree_app && exec bundle exec rails server --binding 127.0.0.1
