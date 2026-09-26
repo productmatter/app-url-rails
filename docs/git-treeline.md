@@ -163,6 +163,11 @@ config.action_mailer.default_url_options = AppUrl.url_options
 config.action_mailer.asset_host = AppUrl.public_base_url
 ```
 
+Set mailer defaults after `AppUrl.configure_development!(config)`: setup replaces
+the route-default hash, so an earlier assignment keeps the old values. If you
+call base URL helpers during configuration, configure `protocol:` explicitly;
+Rails applies its `force_ssl` protocol default later during initialization.
+
 When in doubt, ask who clicks or calls the URL:
 
 - Developer's browser in this Rails session: use `AppUrl.url_options` or

@@ -70,6 +70,9 @@ changed. When `DEV_URL` is set, the setup updates only the host, protocol, and
 effective port in `Rails.application.default_url_options`, preserving unrelated
 options. A default port also clears a stale non-default `:port`. Existing hosts
 and Action Cable origins remain in place.
+When Cable origins are unset in development, setup preserves Rails' default
+localhost allowance. An explicit empty or custom origin list keeps its policy;
+setup adds only the configured development/tunnel origins to that list.
 The call overrides earlier address defaults when `DEV_URL` is set; explicit
 configuration written after the call takes precedence over its results.
 
@@ -148,6 +151,8 @@ omitted protocol follows Rails' effective default, including HTTPS when
 `http`, `https`, `http:`, and `https://`. Explicit empty protocols and malformed
 values such as `http::` raise `ArgumentError` rather than being repaired.
 `url_options` remains a passthrough to the application's defaults.
+If you call URL helpers during configuration, set `protocol:` explicitly:
+Rails applies the `force_ssl` protocol default later during initialization.
 
 Every public helper validates `TUNNEL_URL` when called. `AppUrl.public_url`
 returns the original valid string or `nil` when no override is set; it does not
@@ -191,6 +196,10 @@ future gem upgrades use the existing call and do not replace it.
 
 ## Known limitations
 
+Route defaults such as `subdomain:` or `domain:` can cause Rails route helpers
+to rewrite a supplied host. AppUrl handles host/protocol/port; applications using
+those additional options must account for them when generating public URLs.
+
 ### Session cookies on Public Suffix List hosts
 
 Many tunnel providers serve apps on domains listed in the
@@ -217,6 +226,8 @@ AppUrl 2.0 is a breaking release targeting:
 
 - Ruby >= 3.2 (tested on Ruby 3.2 and 3.4)
 - Rails 8.0 and 8.1 (per-line Gemfiles in `gemfiles/`)
+
+The gem declares Action Pack and Railties dependencies within those Rails lines.
 
 ## Contributing
 

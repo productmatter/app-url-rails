@@ -3,20 +3,10 @@
 require "minitest/autorun"
 require_relative "../lib/app_url"
 
-module Rails
-  class << self
-    attr_accessor :application
-  end
-end
+require_relative "support/app_url_test_support"
 
 class AppUrlConfigurationTest < Minitest::Test
-  class Application
-    attr_accessor :default_url_options
-
-    def initialize
-      @default_url_options = {}
-    end
-  end
+  include AppUrlTestSupport
 
   class CableOptions
     attr_accessor :allowed_request_origins
@@ -43,37 +33,18 @@ class AppUrlConfigurationTest < Minitest::Test
     end
   end
 
-  INVALID_ENVIRONMENT_URLS = [
-    " \t ",
-    "example.com",
-    "ftp://example.com",
-    "https://",
-    "https://user:secret@example.com",
-    "https://@example.com",
-    "https://example.com/path",
-    "https://example.com?query",
-    "https://example.com#fragment",
-    "https://example.com:",
-    "https://example.com:port",
-    "https://example.com:0",
-    "https://example.com:65536",
-    "https://::1",
-    "https://[malformed",
-    "https://example.com/\xFF".b
-  ].freeze
-
   def setup
+    super
     @saved_dev_url = ENV["DEV_URL"]
     @saved_tunnel_url = ENV["TUNNEL_URL"]
     ENV.delete("DEV_URL")
     ENV.delete("TUNNEL_URL")
-    Rails.application = Application.new
   end
 
   def teardown
     restore_environment("DEV_URL", @saved_dev_url)
     restore_environment("TUNNEL_URL", @saved_tunnel_url)
-    Rails.application = nil
+    super
   end
 
   def test_no_environment_urls_make_no_changes
@@ -144,13 +115,13 @@ class AppUrlConfigurationTest < Minitest::Test
     2.times { AppUrl.configure_development!(config) }
 
     assert_equal ["preserved.example", "dev.example", "tunnel.example"], config.hosts
-    assert_equal 4, config.action_cable.allowed_request_origins.size
-    assert_includes config.action_cable.allowed_request_origins, "https://string-origin.example"
-    assert_includes config.action_cable.allowed_request_origins, preserved_regexp
-    assert cable_allowed?(config, "http://dev.example:99999")
-    assert cable_allowed?(config, "https://tunnel.example")
-    refute cable_allowed?(config, "https://dev.example:3100")
-    refute cable_allowed?(config, "https://tunnel.example.evil:4443")
+    assert_equal [
+      "https://string-origin.example",
+      preserved_regexp,
+      %r{\Ahttp://dev\.example(?::\d+)?\z}i,
+      %r{\Ahttps://tunnel\.example(?::\d+)?\z}i
+    ], config.action_cable.allowed_request_origins
+    assert_same preserved_regexp, config.action_cable.allowed_request_origins[1]
   end
 
   def test_setup_converts_a_single_cable_origin_without_losing_it
@@ -160,13 +131,14 @@ class AppUrlConfigurationTest < Minitest::Test
     AppUrl.configure_development!(config)
 
     origins = config.action_cable.allowed_request_origins
-    assert_equal "https://existing-origin.example", origins.first
-    assert_equal 2, origins.size
-    assert cable_allowed?(config, "https://tunnel.example:99999")
+    assert_equal [
+      "https://existing-origin.example",
+      %r{\Ahttps://tunnel\.example(?::\d+)?\z}i
+    ], origins
   end
 
   def test_setup_supports_ipv6_hosts
-    config = CableConfiguration.new
+    config = CableConfiguration.new(origins: [])
     ENV["DEV_URL"] = "http://[::1]:3000/"
 
     AppUrl.configure_development!(config)
@@ -174,8 +146,7 @@ class AppUrlConfigurationTest < Minitest::Test
     assert_equal({ host: "[::1]", protocol: "http", port: 3000 },
                  Rails.application.default_url_options)
     assert_equal ["[::1]"], config.hosts
-    assert cable_allowed?(config, "http://[::1]:99999")
-    refute cable_allowed?(config, "http://[::1].evil:3000")
+    assert_equal [%r{\Ahttp://\[::1\](?::\d+)?\z}i], config.action_cable.allowed_request_origins
   end
 
   def test_both_urls_are_validated_before_any_mutation
@@ -197,24 +168,21 @@ class AppUrlConfigurationTest < Minitest::Test
     assert_equal ["https://existing-origin.example"], origins
   end
 
-  def test_setup_rejects_every_invalid_dev_url_category
-    INVALID_ENVIRONMENT_URLS.each do |value|
-      ENV["DEV_URL"] = value
-      config = ConfigurationWithoutCable.new
+  %w[DEV_URL TUNNEL_URL].each do |setting|
+    define_method("test_setup_rejects_every_invalid_#{setting.downcase}_category_safely") do
+      INVALID_ENVIRONMENT_URLS.each do |category, (value, reason)|
+        ENV[setting] = value
+        config = ConfigurationWithoutCable.new
 
-      error = assert_raises(AppUrl::ConfigurationError) { AppUrl.configure_development!(config) }
-      assert_match(/DEV_URL/, error.message)
-      assert_nil error.cause
-      assert_empty config.hosts
-      assert_empty Rails.application.default_url_options
+        error = assert_raises(AppUrl::ConfigurationError, category) { AppUrl.configure_development!(config) }
+        assert_safe_configuration_error(error, setting, category, value, reason)
+        assert_empty config.hosts
+        assert_empty Rails.application.default_url_options
+      end
     end
   end
 
   private
-
-  def cable_allowed?(config, origin)
-    Array(config.action_cable.allowed_request_origins).any? { |allowed| allowed === origin }
-  end
 
   def restore_environment(name, value)
     value.nil? ? ENV.delete(name) : ENV[name] = value

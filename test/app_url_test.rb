@@ -3,54 +3,24 @@
 require "minitest/autorun"
 require_relative "../lib/app_url"
 
-module Rails
-  class << self
-    attr_accessor :application
-  end
-end
-
-class FakeApplication
-  attr_accessor :default_url_options
-
-  def initialize
-    @default_url_options = {}
-  end
-end
+require_relative "support/app_url_test_support"
 
 class AppUrlTest < Minitest::Test
-  INVALID_TUNNEL_URLS = {
-    "blank" => " \t ",
-    "scheme-less" => "credential-sentinel.example",
-    "unsupported scheme" => "ftp://credential-sentinel.example",
-    "missing host" => "https://",
-    "userinfo" => "https://user:credential-sentinel@example.com",
-    "empty userinfo" => "https://@example.com",
-    "path" => "https://example.com/path-sentinel",
-    "query" => "https://example.com?query-sentinel",
-    "fragment" => "https://example.com#fragment-sentinel",
-    "empty port" => "https://example.com:",
-    "non-integer port" => "https://example.com:port-sentinel",
-    "zero port" => "https://example.com:0",
-    "oversized port" => "https://example.com:65536",
-    "unbracketed IPv6" => "https://::1",
-    "malformed" => "https://[malformed-sentinel",
-    "invalid encoding" => "https://example.com/\xFF".b
-  }.freeze
+  include AppUrlTestSupport
+
   PUBLIC_HELPERS = %i[public_url public_host public_url_options public_base_url].freeze
-  SENTINEL_PATTERN = /credential-sentinel|path-sentinel|query-sentinel|fragment-sentinel|
-                      port-sentinel|malformed-sentinel/x
 
   def setup
+    super
     @saved_tunnel_url = ENV["TUNNEL_URL"]
     @saved_secure_protocol = ActionDispatch::Http::URL.secure_protocol
     ENV.delete("TUNNEL_URL")
-    Rails.application = FakeApplication.new
   end
 
   def teardown
     @saved_tunnel_url.nil? ? ENV.delete("TUNNEL_URL") : ENV["TUNNEL_URL"] = @saved_tunnel_url
     ActionDispatch::Http::URL.secure_protocol = @saved_secure_protocol
-    Rails.application = nil
+    super
   end
 
   def test_host_returns_configured_host_without_reading_tunnel_url
@@ -81,11 +51,16 @@ class AppUrlTest < Minitest::Test
   end
 
   def test_base_url_delegates_address_options_to_rails
-    %w[http https http: https://].each do |protocol|
+    {
+      "http" => "http://example.com:8443",
+      "https" => "https://example.com:8443",
+      "http:" => "http://example.com:8443",
+      "https://" => "https://example.com:8443"
+    }.each do |protocol, expected|
       options = { host: "example.com", protocol:, port: 8443 }
       Rails.application.default_url_options = options
 
-      assert_equal ActionDispatch::Http::URL.full_url_for(options), AppUrl.base_url
+      assert_equal expected, AppUrl.base_url, protocol
     end
   end
 
@@ -194,14 +169,11 @@ class AppUrlTest < Minitest::Test
 
   PUBLIC_HELPERS.each do |helper|
     define_method("test_#{helper}_rejects_every_invalid_tunnel_category_safely") do
-      INVALID_TUNNEL_URLS.each do |category, value|
+      INVALID_ENVIRONMENT_URLS.each do |category, (value, reason)|
         ENV["TUNNEL_URL"] = value
 
         error = assert_raises(AppUrl::ConfigurationError, category) { AppUrl.public_send(helper) }
-        assert_match(/TUNNEL_URL/, error.message, category)
-        assert_match(/expected an absolute http:\/\/ or https:\/\//, error.message, category)
-        assert_nil error.cause, category
-        refute_match SENTINEL_PATTERN, error.full_message, category
+        assert_safe_configuration_error(error, "TUNNEL_URL", category, value, reason)
       end
     end
   end

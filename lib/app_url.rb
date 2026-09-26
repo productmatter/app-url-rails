@@ -141,7 +141,10 @@ class AppUrl
     end
 
     def append_cable_origin(config, origin)
-      origins = Array(config.action_cable.allowed_request_origins)
+      origins = config.action_cable.allowed_request_origins
+      # Preserve the default that the Action Cable engine supplies later during boot.
+      origins = /https?:\/\/localhost:\d+/ if origins.nil? && Rails.env.development?
+      origins = Array(origins)
       config.action_cable.allowed_request_origins = origins
       pattern = %r{\A#{Regexp.escape(origin.fetch(:scheme))}://#{Regexp.escape(origin.fetch(:host))}(?::\d+)?\z}i
       append_once(origins, pattern)

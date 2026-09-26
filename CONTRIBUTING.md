@@ -28,6 +28,9 @@ Ruby 3.2 and 3.4, with one Gemfile per Rails line.
 
    Repeat on Ruby 3.2 and Ruby 3.4; CI exercises all four combinations. The
    integration tests boot isolated apps without a database or network listener.
+   CI sets `LC_ALL=C` to catch locale-sensitive fixture reads. Matrix lockfiles
+   remain untracked so dependency resolution tests current patches within each
+   supported Rails line; recorded patch-version results are point-in-time evidence.
 
 4. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
 5. Run `specline check .` to validate the documentation structure.

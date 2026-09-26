@@ -57,6 +57,10 @@ class InstallGeneratorTest < Minitest::Test
       end
   RUBY
 
+  EMITTED_LEGACY_WIRING = "\n" + LEGACY_WIRING.lines.map do |line|
+    line.strip.empty? ? line : "  #{line}"
+  end.join
+
   def setup
     @app_root = Dir.mktmpdir("app-url-generator-")
   end
@@ -74,7 +78,7 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    assert status.success?, failure_message(stdout, stderr, status)
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
     assert_equal <<~RUBY, File.binread(path)
       Rails.application.configure do
         #{MARKER}
@@ -82,6 +86,46 @@ class InstallGeneratorTest < Minitest::Test
         config.cache_classes = false
       end
     RUBY
+  end
+
+  def test_installation_leaves_other_environment_files_unchanged
+    development_file("Rails.application.configure do\nend\n")
+    other_environments = %w[test production].to_h do |environment|
+      path = File.join(@app_root, "config/environments/#{environment}.rb")
+      contents = "Rails.application.configure do\n  config.eager_load = #{environment == 'production'}\nend\n"
+      File.binwrite(path, contents)
+      [path, contents]
+    end
+
+    stdout, stderr, status = run_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    other_environments.each { |path, original| assert_equal original, File.binread(path) }
+  end
+
+  def test_bin_rails_discovers_the_generator_through_bundler
+    build_rails_command_app
+    path = development_file("Rails.application.configure do\nend\n")
+
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    installed = "Rails.application.configure do\n  #{MARKER}\n  #{CALL}\nend\n"
+    assert_equal installed, File.binread(path)
+
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/already installed/, stdout)
+    assert_equal installed, File.binread(path)
+
+    unsupported = installed.sub("configuration v1", "configuration v2")
+    File.binwrite(path, unsupported)
+    stdout, stderr, status = run_rails_generator
+
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
+    assert_match(/unsupported app-url-rails configuration marker/, "#{stdout}\n#{stderr}")
+    assert_equal unsupported, File.binread(path)
   end
 
   def test_current_installation_is_unchanged_success
@@ -96,7 +140,7 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    assert status.success?, failure_message(stdout, stderr, status)
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
     assert_match(/already installed/, stdout)
     assert_equal original, File.binread(path)
   end
@@ -112,8 +156,8 @@ class InstallGeneratorTest < Minitest::Test
     after_first_run = File.binread(path)
     second_stdout, second_stderr, second_status = run_generator
 
-    assert first_status.success?, failure_message(first_stdout, first_stderr, first_status)
-    assert second_status.success?, failure_message(second_stdout, second_stderr, second_status)
+    assert_equal 0, first_status.exitstatus, failure_message(first_stdout, first_stderr, first_status)
+    assert_equal 0, second_status.exitstatus, failure_message(second_stdout, second_stderr, second_status)
     assert_equal after_first_run, File.binread(path)
     assert_equal 1, File.binread(path).scan(MARKER).length
     assert_equal 1, File.binread(path).scan(CALL).length
@@ -126,7 +170,7 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    assert status.success?, failure_message(stdout, stderr, status)
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
     assert_equal(
       "Rails.application.configure do\r\n  #{MARKER}\r\n  #{CALL}\r\n" \
       "  config.cache_classes = false\r\nend\r\n",
@@ -145,10 +189,18 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    assert status.success?, failure_message(stdout, stderr, status)
+    assert_equal 0, status.exitstatus, failure_message(stdout, stderr, status)
     contents = File.binread(path)
-    assert_equal 2, contents.scan(CALL).length
-    assert_includes contents, "# DEV_URL and TUNNEL_URL used to be configured here."
+    assert_equal <<~RUBY, contents
+      Rails.application.configure do
+        #{MARKER}
+        #{CALL}
+        # DEV_URL and TUNNEL_URL used to be configured here.
+        # A future installer might call AppUrl.configure_development!(config).
+        config.cache_classes = false
+      end
+    RUBY
+    assert_equal 1, contents.scan(MARKER).length
   end
 
   def test_complete_legacy_wiring_fails_with_manual_migration_and_no_change
@@ -157,10 +209,32 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    refute status.success?, failure_message(stdout, stderr, status)
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
     assert_match(/Legacy app-url-rails wiring detected/, "#{stdout}\n#{stderr}")
     assert_match(/Migrate it manually once/, "#{stdout}\n#{stderr}")
     assert_equal original, File.binread(path)
+  end
+
+  def test_emitted_legacy_indentation_and_leading_blank_line_require_manual_migration
+    assert_failure_without_change(
+      "Rails.application.configure do\n#{EMITTED_LEGACY_WIRING}end\n",
+      /Legacy app-url-rails wiring detected.*Migrate it manually once/m
+    )
+  end
+
+  def test_legacy_wiring_with_current_marker_and_call_is_not_a_successful_no_op
+    assert_failure_without_change(
+      "Rails.application.configure do\n  #{MARKER}\n  #{CALL}\n#{EMITTED_LEGACY_WIRING}end\n",
+      /Legacy app-url-rails wiring detected.*Migrate it manually once/m
+    )
+  end
+
+  def test_legacy_wiring_with_only_the_dev_branch_fails_without_changes
+    partial_wiring = EMITTED_LEGACY_WIRING.split('  if (tunnel = ENV["TUNNEL_URL"])', 2).first
+    assert_failure_without_change(
+      "Rails.application.configure do\n#{partial_wiring}end\n",
+      /partial, custom, or misplaced/
+    )
   end
 
   def test_partial_environment_wiring_fails_and_is_unchanged
@@ -248,7 +322,7 @@ class InstallGeneratorTest < Minitest::Test
   def test_missing_development_file_exits_nonzero_without_creating_it
     stdout, stderr, status = run_generator
 
-    refute status.success?, failure_message(stdout, stderr, status)
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
     assert_match(/development\.rb not found/, "#{stdout}\n#{stderr}")
     refute File.exist?(File.join(@app_root, DEVELOPMENT_RB))
   end
@@ -258,6 +332,25 @@ class InstallGeneratorTest < Minitest::Test
       Rails.application.configure {
         config.cache_classes = false
       }
+    RUBY
+  end
+
+  def test_two_configure_blocks_fail_and_are_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      Rails.application.configure do
+        config.cache_classes = false
+      end
+      Rails.application.configure do
+        config.eager_load = false
+      end
+    RUBY
+  end
+
+  def test_configure_block_with_a_parameter_fails_and_is_unchanged
+    assert_failure_without_change(<<~RUBY, /standard `Rails\.application\.configure do` block/)
+      Rails.application.configure do |app|
+        app.config.eager_load = false
+      end
     RUBY
   end
 
@@ -281,6 +374,51 @@ class InstallGeneratorTest < Minitest::Test
 
   private
 
+  def build_rails_command_app
+    files = {
+      "bin/rails" => <<~RUBY,
+        APP_PATH = File.expand_path("../config/application", __dir__)
+        require_relative "../config/boot"
+        require "rails/commands"
+      RUBY
+      "config/boot.rb" => "require 'bundler/setup'\n",
+      "config/application.rb" => <<~RUBY,
+        require_relative "boot"
+        require "rails"
+        require "action_controller/railtie"
+        Bundler.require(:default)
+
+        module GeneratorDiscoveryFixture
+          class Application < Rails::Application
+            config.eager_load = false
+            config.logger = Logger.new(IO::NULL)
+            config.secret_key_base = "generator-discovery-fixture"
+          end
+        end
+      RUBY
+      "config/environment.rb" => <<~RUBY
+        require_relative "application"
+        Rails.application.initialize!
+      RUBY
+    }
+    files.each do |relative_path, contents|
+      path = File.join(@app_root, relative_path)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.binwrite(path, contents)
+    end
+  end
+
+  def run_rails_generator
+    environment = {
+      "BUNDLE_GEMFILE" => Bundler.default_gemfile.to_s,
+      "RAILS_ENV" => "development",
+      "RACK_ENV" => "development",
+      "DEV_URL" => nil,
+      "TUNNEL_URL" => nil
+    }
+    Open3.capture3(environment, RbConfig.ruby, "bin/rails", "generate", "app_url:install", chdir: @app_root)
+  end
+
   def development_file(contents)
     path = File.join(@app_root, DEVELOPMENT_RB)
     FileUtils.mkdir_p(File.dirname(path))
@@ -298,7 +436,7 @@ class InstallGeneratorTest < Minitest::Test
 
     stdout, stderr, status = run_generator
 
-    refute status.success?, failure_message(stdout, stderr, status)
+    assert_equal 1, status.exitstatus, failure_message(stdout, stderr, status)
     assert_match message_pattern, "#{stdout}\n#{stderr}"
     assert_equal original, File.binread(path)
   end

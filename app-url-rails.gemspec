@@ -25,4 +25,7 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir["lib/**/*.rb", "LICENSE.txt", "README.md"]
   spec.require_paths = ["lib"]
+
+  spec.add_dependency "actionpack", ">= 8.0", "< 8.2"
+  spec.add_dependency "railties", ">= 8.0", "< 8.2"
 end

@@ -56,7 +56,10 @@ failures, and reliable installation without changing developer-owned wiring.
    options. A default port replaces any stale non-default port. Both supplied
    hosts are allowed, existing allowed hosts/origins are preserved, and Cable
    receives the existing scheme/host policy allowing different ports. Apps
-   without Cable work. With neither variable set, setup makes no changes. The
+   that leave Cable origins unset retain Rails' default localhost allowance in
+   development; explicit empty/custom lists and other environments do not acquire
+   that fallback. Apps without Cable work. With neither variable set, setup makes
+   no changes. The
    call takes effect at its position in the configure block: earlier address
    defaults are overridden by `DEV_URL`; later explicit app settings can override
    it. It neither changes mailer defaults nor derives values from requests.
@@ -198,6 +201,10 @@ failures, and reliable installation without changing developer-owned wiring.
 - The agreed Ruby/Rails matrix, dependency resolution, and per-entry results are
   recorded; all tests pass in each entry — run: `bundle exec rake test`
 - The gem remains buildable — run: `gem build app-url-rails.gemspec --strict`
+- Declared runtime dependencies support loading the packaged gem and using a
+  public URL helper without Bundler or the development/test bundle.
+- The full matrix passes under `LC_ALL=C`; fixture text handling does not depend
+  on the invoking shell's default encoding.
 - The documentation structure remains valid — run: `specline check .`
 
 ### judgeable
