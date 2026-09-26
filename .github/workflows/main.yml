@@ -8,12 +8,24 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile }}
+    strategy:
+      matrix:
+        ruby-version: ["3.2", "3.4"]
+        rails-line: ["8.0", "8.1"]
+        include:
+          - rails-line: "8.0"
+            gemfile: gemfiles/rails_8_0.gemfile
+          - rails-line: "8.1"
+            gemfile: gemfiles/rails_8_1.gemfile
     steps:
       - uses: actions/checkout@v7
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler: default
           bundler-cache: true
 
       - name: Validate gemspec
