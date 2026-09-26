@@ -1,4 +1,5 @@
 /.bundle/
+**/vendor/bundle/
 /tmp/
 /test/tmp/
 *.gem
