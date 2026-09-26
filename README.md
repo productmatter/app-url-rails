@@ -4,33 +4,48 @@
 [![CI](https://github.com/productmatter/app-url-rails/actions/workflows/main.yml/badge.svg)](https://github.com/productmatter/app-url-rails/actions/workflows/main.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE.txt)
 
-A single API for resolving your Rails app's URL across production, development,
-and tunneled environments. Replaces ad-hoc `request.host`,
-`default_url_options`, and `ENV` lookups with one consistent call.
+**The right Rails URL for every worktree.**
+
+Run parallel copies of your app for different branches, developers, or AI
+agents. Your workspace tooling supplies each instance's address. AppUrl connects
+it to Rails' URL defaults, allowed hosts, and Action Cable, and gives your code
+one API for application URLs and public callbacks.
+
+Born alongside [git-treeline](docs/git-treeline.md), AppUrl works with any tool
+that supplies environment variables before Rails starts: a workspace manager,
+shell script, or container launcher. Install once; each instance uses the
+addresses its environment supplies.
 
 ## Installation
 
-Add the gem and run the install generator:
+Add the gem and run the generator once:
 
 ```sh
 bundle add app-url-rails
 bin/rails g app_url:install
 ```
 
-The generator is idempotent and modifies only `config/environments/development.rb`.
-New installations add one explicit call inside the Rails configure block:
+Have your tooling supply these before server startup, or export them yourself
+using addresses provided by your local server/router and tunnel:
 
-```ruby
-# app-url-rails: configuration v1
-AppUrl.configure_development!(config)
+```sh
+export DEV_URL=https://checkout-fix.localhost
+export TUNNEL_URL=https://checkout-fix.ngrok.app # optional
 ```
 
-The marker identifies the installation format, so gem releases can improve the
-implementation without replacing application-owned configuration.
-Existing 1.x installations need the [one-time upgrade](#upgrading-from-1x) below;
-rerunning the generator does not migrate copied wiring.
+AppUrl handles the Rails wiring. Your tooling handles the server, routing, and
+tunnel. The generator changes only `config/environments/development.rb`.
+Existing 1.x users: follow the [one-time upgrade](#upgrading-from-1x).
 
 ## Usage
+
+```ruby
+AppUrl.base_url         # => "https://checkout-fix.localhost"
+AppUrl.public_base_url  # => "https://checkout-fix.ngrok.app"
+```
+
+Without `TUNNEL_URL`, `public_base_url` falls back to the app's address. Use the
+options helpers when generating named Rails routes:
 
 ```ruby
 # Internal URLs: app's configured host
@@ -129,19 +144,23 @@ Restart Rails after changing these environment variables so boot-time host and
 Action Cable configuration are refreshed; public helpers still read
 `TUNNEL_URL` on demand.
 
-For parallel-worktree workflows such as
-[git-treeline](https://github.com/git-treeline/git-treeline), each workspace
-can export its own `DEV_URL` and `TUNNEL_URL`, giving every branch distinct
-internal and public URLs without manual `.env` edits.
-
 See [git-treeline and AppUrl Adoption](docs/git-treeline.md) for setup patterns
 with and without git-treeline, the Rails stack touchpoints `AppUrl` can feed,
 and the Action Cable port nuance for router-backed development URLs.
 
 ## How it works
 
-The install generator adds the marked setup call shown above. The gem owns the
-parsing and Rails wiring behind that call, including `config.hosts`,
+The install generator adds an explicit setup call inside the development
+configure block:
+
+```ruby
+# app-url-rails: configuration v1
+AppUrl.configure_development!(config)
+```
+
+The marker identifies the installation format, independently of the gem version.
+A recognized installation is an unchanged success when the generator is rerun.
+The gem owns parsing and Rails wiring behind the call, including `config.hosts`,
 `Rails.application.default_url_options`, and Action Cable origins. It preserves
 existing allowlists and unrelated URL options, and repeated calls do not add
 duplicates. The public helpers read `TUNNEL_URL` on demand, but boot-time host
