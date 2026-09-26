@@ -201,7 +201,8 @@ failures, and reliable installation without changing developer-owned wiring.
   unchanged. A documented manual legacy-to-call migration boots successfully.
 - The agreed Ruby/Rails matrix, dependency resolution, and per-entry results are
   recorded; all tests pass in each entry — run: `bundle exec rake test`
-- The gem remains buildable — run: `gem build app-url-rails.gemspec --strict`
+- The gem remains buildable — run: `gem build app-url-rails.gemspec`. Open-ended
+  Rails dependencies are intentional; dependency-bound advisories are not errors.
 - Declared runtime dependencies support loading the packaged gem and using a
   public URL helper without Bundler or the development/test bundle.
 - The full matrix passes under `LC_ALL=C`; fixture text handling does not depend

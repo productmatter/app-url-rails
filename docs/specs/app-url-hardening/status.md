@@ -30,7 +30,8 @@ proposal remain separate decisions.
   reran Rails 7.0/Ruby 3.4 generator discovery independently (1 run, 10 assertions).
 - Expanded README upgrade instructions and checked its before/after claims
   against the original implementation and current code.
-- Strict gem build passed for 2.0.0. Specline 3.0.0 validation has no findings,
+- Local strict gem build passed for 2.0.0 with RubyGems 4.0.10; see the CI
+  packaging correction below. Specline 3.0.0 validation has no findings,
   index sync is current, and `git diff --check` is clean.
 
 ## In progress
@@ -61,7 +62,8 @@ Baseline preserved in commit `8bb1858`, before runtime/generator changes:
 `RBENV_VERSION=3.4.8 rbenv exec bundle exec rake test` — 50 runs, 204 assertions,
 zero failures/errors/skips on Rails 8.1.3.1.
 
-Build: `RBENV_VERSION=3.4.8 rbenv exec gem build app-url-rails.gemspec --strict`.
+Build: `gem build app-url-rails.gemspec`, verified with RubyGems 3.6.4 and
+4.0.10. The earlier strict build result used local RubyGems 4.0.10 only.
 Specline checks used the locally bundled CLI via Node because the installed
 wrapper requires unavailable `npx`: `check . --format json` and `sync . --check`.
 
@@ -71,6 +73,12 @@ wrapper requires unavailable `npx`: `check . --format json` and `sync . --check`
 
 ## Corrections
 
+- PR CI exposed a packaging-tool difference: the recorded strict build passed
+  with local RubyGems 4.0.10, while CI's RubyGems 3.x warns about the intentionally
+  open-ended Rails dependencies and `--strict` promotes that warning to failure.
+  Use ordinary `gem build` in CI and contributor instructions, preserving normal
+  specification validation and the approved Rails support range. Disable matrix
+  fail-fast so one failed job does not cancel the other compatibility checks.
 - Restored Rails 7 support and removed `< 8.2` after distinguishing tested
   compatibility from installation restrictions. Runtime dependencies now permit
   Rails 7.0+; Ruby 3.2 remains the minimum. Rails 7.2's test bundle uses Minitest 5

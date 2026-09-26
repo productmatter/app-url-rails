@@ -38,7 +38,10 @@ Ruby 3.2 and 3.4, with one Gemfile per Rails line.
    remain untracked so dependency resolution tests current patches within each
    supported Rails line; recorded patch-version results are point-in-time evidence.
 
-4. Run `gem build app-url-rails.gemspec --strict` to validate the gemspec.
+4. Run `gem build app-url-rails.gemspec` to validate and build the gem. Rails
+   dependencies intentionally have no upper bound. RubyGems 3.x warns about
+   that policy, so do not use `--strict` to turn those advisories into failures.
+   Normal builds still reject invalid gem specifications.
 5. Run `specline check .` to validate the documentation structure.
 6. Open a pull request with a clear description of the change and why it's needed.
 

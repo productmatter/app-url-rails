@@ -12,6 +12,7 @@ jobs:
       BUNDLE_GEMFILE: ${{ matrix.gemfile }}
       LC_ALL: C
     strategy:
+      fail-fast: false
       matrix:
         ruby-version: ["3.2", "3.4"]
         rails-line: ["7.0", "7.1", "7.2", "8.0", "8.1"]
@@ -36,7 +37,8 @@ jobs:
           bundler-cache: true
 
       - name: Validate gemspec
-        run: gem build app-url-rails.gemspec --strict
+        # Rails dependencies intentionally have no upper bound; older RubyGems warns.
+        run: gem build app-url-rails.gemspec
 
       - name: Smoke test
         run: bundle exec ruby -Ilib -e "require 'app_url'; puts AppUrl::VERSION"

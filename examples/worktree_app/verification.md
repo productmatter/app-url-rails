@@ -81,7 +81,10 @@ through the working canonical connection.
 
 The existing gem suite passed: **84 runs, 1,970 assertions, zero failures,
 errors, or skips**, under `LC_ALL=C` with Ruby 3.4.8. Specline 3.0 validation,
-index sync, and whitespace checks passed.
+index sync, and whitespace checks passed. Gem packaging uses ordinary
+`gem build`: RubyGems 3.x warns about the intentional open-ended Rails
+dependencies, while RubyGems 4.0.10 does not. The earlier local strict-build
+result did not establish portability of warning behavior between those versions.
 
 This run proves one real Treeline worktree, its generated installation, and
 its local HTTPS router. It does not claim a provisioned public tunnel, an
