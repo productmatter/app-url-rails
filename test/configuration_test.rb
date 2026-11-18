@@ -37,13 +37,16 @@ class AppUrlConfigurationTest < Minitest::Test
     super
     @saved_dev_url = ENV["DEV_URL"]
     @saved_tunnel_url = ENV["TUNNEL_URL"]
+    @saved_tunnel_host = ENV["TUNNEL_HOST"]
     ENV.delete("DEV_URL")
     ENV.delete("TUNNEL_URL")
+    ENV.delete("TUNNEL_HOST")
   end
 
   def teardown
     restore_environment("DEV_URL", @saved_dev_url)
     restore_environment("TUNNEL_URL", @saved_tunnel_url)
+    restore_environment("TUNNEL_HOST", @saved_tunnel_host)
     super
   end
 
@@ -111,17 +114,73 @@ class AppUrlConfigurationTest < Minitest::Test
     )
     ENV["DEV_URL"] = "http://dev.example:3100"
     ENV["TUNNEL_URL"] = "https://tunnel.example:4443"
+    ENV["TUNNEL_HOST"] = "tunnels.example"
 
     2.times { AppUrl.configure_development!(config) }
 
-    assert_equal ["preserved.example", "dev.example", "tunnel.example"], config.hosts
+    assert_equal ["preserved.example", "dev.example", "tunnel.example", ".tunnels.example"], config.hosts
     assert_equal [
       "https://string-origin.example",
       preserved_regexp,
       %r{\Ahttp://dev\.example(?::\d+)?\z}i,
-      %r{\Ahttps://tunnel\.example(?::\d+)?\z}i
+      %r{\Ahttps://tunnel\.example(?::\d+)?\z}i,
+      %r{\Ahttps://(?:[^/:]+\.)?tunnels\.example(?::\d+)?\z}i
     ], config.action_cable.allowed_request_origins
     assert_same preserved_regexp, config.action_cable.allowed_request_origins[1]
+  end
+
+  def test_tunnel_host_allows_the_domain_and_its_subdomains_without_touching_urls
+    defaults = { host: "existing.example", protocol: "https" }
+    Rails.application.default_url_options = defaults
+    config = CableConfiguration.new(origins: [])
+    ENV["TUNNEL_HOST"] = "tunnels.example"
+
+    AppUrl.configure_development!(config)
+
+    assert_same defaults, Rails.application.default_url_options
+    assert_equal [".tunnels.example"], config.hosts
+    assert_nil AppUrl.public_url
+    assert_equal "existing.example", AppUrl.public_host
+
+    pattern = config.action_cable.allowed_request_origins.fetch(0)
+    assert_equal 1, config.action_cable.allowed_request_origins.size
+    %w[https://s-1f3a.tunnels.example https://tunnels.example https://deep.s-1f3a.tunnels.example:4443
+       HTTPS://S-1F3A.TUNNELS.EXAMPLE].each do |origin|
+      assert_match pattern, origin
+    end
+    %w[http://s-1f3a.tunnels.example https://tunnels.example.evil https://eviltunnels.example
+       https://s-1f3a.tunnels.example/path https://user@tunnels.example].each do |origin|
+      refute_match pattern, origin
+    end
+  end
+
+  def test_tunnel_host_without_cable_support_only_allows_hosts
+    config = ConfigurationWithoutCable.new(hosts: ["preserved.example"])
+    ENV["TUNNEL_HOST"] = "tunnels.example"
+
+    AppUrl.configure_development!(config)
+
+    assert_equal ["preserved.example", ".tunnels.example"], config.hosts
+  end
+
+  def test_tunnel_host_is_validated_before_any_mutation
+    hosts = ["existing.example"]
+    origins = ["https://existing-origin.example"]
+    Rails.application.default_url_options = {}
+    config = CableConfiguration.new(hosts:, origins:)
+    ENV["DEV_URL"] = "http://dev.example:3100"
+
+    INVALID_ENVIRONMENT_HOSTS.each do |category, (value, reason)|
+      ENV["TUNNEL_HOST"] = value
+
+      error = assert_raises(AppUrl::ConfigurationError, category) { AppUrl.configure_development!(config) }
+
+      assert_safe_configuration_error(error, "TUNNEL_HOST", category, value, reason,
+                                      expected: /expected a bare domain/)
+      assert_equal ["existing.example"], hosts, category
+      assert_equal ["https://existing-origin.example"], origins, category
+      assert_empty Rails.application.default_url_options, category
+    end
   end
 
   def test_setup_converts_a_single_cable_origin_without_losing_it

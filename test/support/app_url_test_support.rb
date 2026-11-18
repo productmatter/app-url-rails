@@ -22,6 +22,21 @@ module AppUrlTestSupport
     "invalid encoding" => ["https://example.com/encoding-sentinel\xFF".b, "is malformed"]
   }.freeze
 
+  INVALID_ENVIRONMENT_HOSTS = {
+    "blank" => [" \t ", "must not be blank"],
+    "scheme" => ["https://credential-sentinel.example", "must not include a scheme"],
+    "port" => ["credential-sentinel.example:443", "must not include a port"],
+    "path" => ["example.com/path-sentinel", "must not include a path, query, or fragment"],
+    "query" => ["example.com?query-sentinel", "must not include a path, query, or fragment"],
+    "userinfo" => ["user@credential-sentinel.example", "must not include userinfo"],
+    "leading dot" => [".credential-sentinel.example", "must not start or end with a dot"],
+    "trailing dot" => ["credential-sentinel.example.", "must not start or end with a dot"],
+    "single label" => ["label-sentinel", "must be a dotted hostname"],
+    "invalid characters" => ["bad_label-sentinel.example", "must be a dotted hostname"],
+    "whitespace inside" => ["space-sentinel .example", "must be a dotted hostname"],
+    "invalid encoding" => ["encoding-sentinel.example\xFF".b, "is malformed"]
+  }.freeze
+
   def setup
     super
     @saved_application = Rails.application
@@ -35,9 +50,10 @@ module AppUrlTestSupport
     super
   end
 
-  def assert_safe_configuration_error(error, setting, category, value, reason)
+  def assert_safe_configuration_error(error, setting, category, value, reason,
+                                      expected: /expected an absolute http:\/\/ or https:\/\//)
     assert_match(/\A#{setting} #{Regexp.escape(reason)};/, error.message, category)
-    assert_match(/expected an absolute http:\/\/ or https:\/\//, error.message, category)
+    assert_match(expected, error.message, category)
     assert_nil error.cause, category
     sentinel = value.b[/[a-z]+-sentinel/]
     refute_includes error.full_message, sentinel, category if sentinel
