@@ -403,11 +403,12 @@ class RealBootTest < Minitest::Test
     %w[s-1f3a.tunnels.example tunnels.example].each do |host|
       assert_equal(tunnel_host ? 200 : 403, statuses.fetch(host), host)
     end
-    %w[tunnels.example.evil eviltunnels.example].each do |host|
+    %w[deep.s-1f3a.tunnels.example tunnels.example.evil eviltunnels.example].each do |host|
       assert_equal 403, statuses.fetch(host), host
     end
     assert_equal(tunnel_host && rails_env == "development" ? 200 : 403,
                  forwarded.fetch("s-1f3a.tunnels.example"))
+    assert_equal 403, forwarded.fetch("deep.s-1f3a.tunnels.example")
     assert_equal 403, forwarded.fetch("tunnels.example.evil")
     assert_equal(tunnel_host ? 1 : 0, counts.fetch(".tunnels.example"))
   end
@@ -425,6 +426,7 @@ class RealBootTest < Minitest::Test
     refute origins.fetch("tunnel_lookalike")
     assert_equal !!tunnel_host, origins.fetch("tunnel_domain")
     assert_equal !!tunnel_host, origins.fetch("tunnel_domain_apex")
+    refute origins.fetch("tunnel_domain_nested")
     refute origins.fetch("tunnel_domain_wrong_scheme")
     refute origins.fetch("tunnel_domain_lookalike")
     refute origins.fetch("unrelated")

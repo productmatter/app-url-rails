@@ -13,9 +13,9 @@ size: small
 
 ## Goal
 
-With `TUNNEL_HOST=tunnels.example`, a real Rails boot answers 200 to any
-`*.tunnels.example` host (direct or forwarded) and accepts its `https` Cable
-origins, while `TUNNEL_URL` and every `AppUrl` helper behave exactly as before.
+With `TUNNEL_HOST=tunnels.example`, a real Rails boot answers 200 to the domain
+and its immediate subdomains (direct or forwarded) and accepts their `https`
+Cable origins. `TUNNEL_URL` continues to drive the public URL helpers.
 
 ## Intent
 
@@ -46,11 +46,11 @@ validation, host and Cable wiring, tests, and documentation.
    configuration changes, naming the setting and reason without echoing the
    raw value. All three environment settings are validated before mutation.
 3. Setup appends `.<TUNNEL_HOST>` to `config.hosts`, so Rails host authorization
-   accepts the domain and every subdomain, including a forwarded host supplied
+   accepts the domain and its immediate subdomains, including hosts forwarded
    by a local proxy.
 4. When Action Cable is configured, setup appends one origin pattern accepting
-   `https://` on the domain or any subdomain, on any port. Existing allowances
-   and Rails' development localhost default are preserved, and repeated calls
+   `https://` on the domain or an immediate subdomain, on any port. Setup preserves
+   existing allowances and Rails' development localhost default. Repeated calls
    add no duplicates.
 5. `TUNNEL_HOST` has no effect on `Rails.application.default_url_options` or on
    any `AppUrl` URL helper.
@@ -74,8 +74,9 @@ validation, host and Cable wiring, tests, and documentation.
   safe error messages and no mutation on failure.
 - Unit tests cover the host entry, the Cable pattern's accepted and rejected
   origins, idempotence, and untouched URL defaults and public helpers.
-- A real Rails boot accepts `Host` and `X-Forwarded-Host` values under the
-  domain, rejects lookalike domains, and makes matching Cable origin decisions.
+- A real Rails boot accepts the domain and immediate subdomains in `Host` and
+  `X-Forwarded-Host`, rejects nested subdomains and lookalike domains, and makes
+  matching Cable origin decisions.
 - The existing suite stays green on the current Rails line; `git diff --check`
   and `specline check .` pass.
 

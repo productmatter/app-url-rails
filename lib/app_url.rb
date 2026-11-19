@@ -57,8 +57,8 @@ class AppUrl
 
       return unless tunnel_domain
 
-      # A leading dot allows the domain and every subdomain, which is how tunnel
-      # providers hand out per-session hosts (git-treeline's `gtl share`, for one).
+      # Rails' leading-dot syntax allows the domain and one subdomain label,
+      # which covers git-treeline's per-session share hosts.
       append_once(config.hosts, ".#{tunnel_domain}")
       append_cable_domain(config, tunnel_domain) if config.respond_to?(:action_cable)
     end
@@ -180,7 +180,7 @@ class AppUrl
     end
 
     def append_cable_domain(config, domain)
-      pattern = %r{\Ahttps://(?:[^/:]+\.)?#{Regexp.escape(domain)}(?::\d+)?\z}i
+      pattern = %r{\Ahttps://(?:[a-z0-9-]+\.)?#{Regexp.escape(domain)}(?::\d+)?\z}i
       append_once(cable_origins(config), pattern)
     end
 

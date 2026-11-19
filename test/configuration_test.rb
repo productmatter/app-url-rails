@@ -124,7 +124,7 @@ class AppUrlConfigurationTest < Minitest::Test
       preserved_regexp,
       %r{\Ahttp://dev\.example(?::\d+)?\z}i,
       %r{\Ahttps://tunnel\.example(?::\d+)?\z}i,
-      %r{\Ahttps://(?:[^/:]+\.)?tunnels\.example(?::\d+)?\z}i
+      %r{\Ahttps://(?:[a-z0-9-]+\.)?tunnels\.example(?::\d+)?\z}i
     ], config.action_cable.allowed_request_origins
     assert_same preserved_regexp, config.action_cable.allowed_request_origins[1]
   end
@@ -144,12 +144,13 @@ class AppUrlConfigurationTest < Minitest::Test
 
     pattern = config.action_cable.allowed_request_origins.fetch(0)
     assert_equal 1, config.action_cable.allowed_request_origins.size
-    %w[https://s-1f3a.tunnels.example https://tunnels.example https://deep.s-1f3a.tunnels.example:4443
+    %w[https://s-1f3a.tunnels.example https://tunnels.example https://s-1f3a.tunnels.example:4443
        HTTPS://S-1F3A.TUNNELS.EXAMPLE].each do |origin|
       assert_match pattern, origin
     end
     %w[http://s-1f3a.tunnels.example https://tunnels.example.evil https://eviltunnels.example
-       https://s-1f3a.tunnels.example/path https://user@tunnels.example].each do |origin|
+       https://s-1f3a.tunnels.example/path https://user@tunnels.example
+       https://deep.s-1f3a.tunnels.example:4443].each do |origin|
       refute_match pattern, origin
     end
   end

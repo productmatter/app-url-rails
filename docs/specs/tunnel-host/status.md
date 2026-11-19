@@ -16,14 +16,14 @@ Jonathan's review. Version bump and release are separate decisions.
   / Ruby 3.4.8 under `LC_ALL=C`.
 - Added `TUNNEL_HOST` to `AppUrl.configure_development!`: bare-hostname
   validation with safe errors, `.<domain>` host allowance, one `https`
-  any-subdomain any-port Cable origin pattern, idempotent, validated before any
-  mutation alongside `DEV_URL` and `TUNNEL_URL`.
+  Cable origin pattern for the domain and its immediate subdomains on any port,
+  idempotent, validated before any mutation alongside `DEV_URL` and `TUNNEL_URL`.
 - Unit coverage: twelve invalid categories with sentinel-safe messages and no
   mutation; accepted and rejected Cable origins; untouched URL defaults and
   public helpers; idempotence; configuration without Action Cable.
-- Real-boot coverage: direct and `X-Forwarded-Host` requests under the domain
-  return 200 while lookalike domains return 403; Cable accepts `https` on the
-  domain and subdomains and rejects `http` and lookalikes; repeated setup adds
+- Real-boot coverage: direct and `X-Forwarded-Host` requests to the domain or its
+  immediate subdomains return 200. Nested subdomains and lookalike domains
+  return 403. Cable accepts matching `https` origins; repeated setup adds
   no duplicates; an invalid `TUNNEL_HOST` aborts before any mutation.
 - Documented the variable in the README (configuration table, per-session
   tunnel hosts section) and the git-treeline guide (contract table, `.treeline.yml`

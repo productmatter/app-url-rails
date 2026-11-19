@@ -91,7 +91,7 @@ Three environment variables, all optional, all conventionally development-only:
 | --- | --- |
 | `DEV_URL` | Browser-facing URL for development. Sets `default_url_options` and adds the host to `config.hosts`. |
 | `TUNNEL_URL` | Publicly reachable URL for development. Surfaces via `AppUrl.public_*` and is added to `config.hosts`. |
-| `TUNNEL_HOST` | Bare tunnel domain such as `tunnels.example`. Allows the domain and every subdomain in `config.hosts` and as an `https` Action Cable origin. Does not affect any URL helper. |
+| `TUNNEL_HOST` | Bare tunnel domain such as `tunnels.example`. Allows the domain and its immediate subdomains in `config.hosts` and as an `https` Action Cable origin. Does not affect any URL helper. |
 
 With none set, the development environment behaves as it did before
 installing the gem. All values are validated before any Rails configuration is
@@ -174,12 +174,12 @@ random hosts under the same domain for ad-hoc sharing (git-treeline's
 
 ```sh
 export TUNNEL_URL=https://checkout-fix.gtltunnel.dev   # the public origin
-export TUNNEL_HOST=gtltunnel.dev                        # every host under it
+export TUNNEL_HOST=gtltunnel.dev                        # domain and immediate subdomains
 ```
 
 Setup appends `.gtltunnel.dev` to `config.hosts` and one `https` Action Cable
-origin pattern for the domain and its subdomains on any port. A set value must
-be a dotted hostname with no scheme, port, path, or leading dot; anything else
+origin pattern for the domain and its immediate subdomains on any port. A set
+value must be a dotted hostname with no scheme, port, path, or leading dot. Anything else
 raises `AppUrl::ConfigurationError`. This is a development allowance for a
 domain you control; keep `TUNNEL_HOST` unset in production.
 

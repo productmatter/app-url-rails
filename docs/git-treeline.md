@@ -16,7 +16,7 @@ git-treeline.
 | `PORT` | Port your Rails server binds to. | `bin/dev`, Procfile, git-treeline |
 | `DEV_URL` | Browser-facing app URL used for Rails URL helpers and `AppUrl.base_url`. | Manual env or git-treeline router URL |
 | `TUNNEL_URL` | Optional public URL for webhooks, SMS links, email links, Slack links, partner embeds, and other outside callers. | ngrok, Cloudflare Tunnel, git-treeline tunnel |
-| `TUNNEL_HOST` | Optional bare tunnel domain. Allows every host under it, including the random `s-<id>.<domain>` hosts `gtl share` hands out. | git-treeline `{tunnel_host}` |
+| `TUNNEL_HOST` | Optional bare tunnel domain. Allows the domain and its immediate subdomains, including the random `s-<id>.<domain>` hosts `gtl share` hands out. | git-treeline `{tunnel_host}` |
 
 `DEV_URL` drives internal app URLs. `TUNNEL_URL` drives outsider-facing URLs
 through `AppUrl.public_*`. Keep them separate unless your development URL is
@@ -97,11 +97,11 @@ AppUrl.configure_development!(config)
 The gem owns the wiring behind the call:
 
 - `config.hosts` gets the `DEV_URL` host and, when set, the `TUNNEL_URL` host
-  and `.{TUNNEL_HOST}` (the domain and every subdomain).
+  and `.{TUNNEL_HOST}` (the domain and its immediate subdomains).
 - `Rails.application.default_url_options` is derived from `DEV_URL`.
 - `config.action_cable.allowed_request_origins` accepts the `DEV_URL` and
-  `TUNNEL_URL` scheme/host on any port in development, and `https` on any host
-  under `TUNNEL_HOST`.
+  `TUNNEL_URL` scheme/host on any port in development, and `https` on
+  `TUNNEL_HOST` and its immediate subdomains.
 
 git-treeline's router (`gtl serve`) and share proxy (`gtl share`) reach Rails
 with `Host: 127.0.0.1:<port>` and the browser's host in `X-Forwarded-Host`.
@@ -355,5 +355,7 @@ If a `gtl share` link returns `Blocked hosts`, set `TUNNEL_HOST` to the tunnel
 domain (`TUNNEL_HOST: "{tunnel_host}"` in `.treeline.yml`) and restart. Do not
 put a domain suffix in `TUNNEL_URL`; it must stay a full origin. `gtl share`
 falls back to a random `*.trycloudflare.com` host when no named tunnel is
-configured or that tunnel's daemon is already running; that domain is not yours
-to allow from the gem, so add it to `config.hosts` locally if you need it.
+configured or that tunnel's daemon is already running. That hostname is random
+and known only after the share starts, so for quick tunnels add
+`config.hosts << ".trycloudflare.com"` to your local development configuration
+rather than the gem; the one-label rule keeps it as narrow as the hosts issued.
