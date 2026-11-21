@@ -24,7 +24,7 @@ gem, install generator, Treeline URL allocation, and Action Cable work together.
 Install from the GitHub release tag by adding this to your Gemfile:
 
 ```ruby
-gem "app-url-rails", git: "https://github.com/productmatter/app-url-rails.git", tag: "v2.0.0"
+gem "app-url-rails", git: "https://github.com/productmatter/app-url-rails.git", tag: "v2.1.0"
 ```
 
 The Git tag works with Bundler without a RubyGems publication. Keep the gem
@@ -251,7 +251,7 @@ Version 2.0 changes these contracts:
 The 2.0 installer does not rewrite copied application code. Upgrade an existing
 app once:
 
-1. Update the app's Gemfile to use the `v2.0.0` Git tag shown in
+1. Update the app's Gemfile to use the Git tag shown in
    [Installation](#installation), replacing any previous `ref:` pin, then run
    `bundle update app-url-rails`.
 2. In `config/environments/development.rb`, remove only the complete old generated
