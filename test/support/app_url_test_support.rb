@@ -34,6 +34,7 @@ module AppUrlTestSupport
     "single label" => ["label-sentinel", "must be a dotted hostname"],
     "invalid characters" => ["bad_label-sentinel.example", "must be a dotted hostname"],
     "whitespace inside" => ["space-sentinel .example", "must be a dotted hostname"],
+    "non-ASCII lookalike" => ["Kelvin-sentinel.example", "must be a dotted hostname"],
     "invalid encoding" => ["encoding-sentinel.example\xFF".b, "is malformed"]
   }.freeze
 

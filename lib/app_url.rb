@@ -100,7 +100,9 @@ class AppUrl
       configuration_error(setting, "is malformed")
     end
 
-    HOSTNAME = /\A[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\z/i
+    # Explicit A-Z instead of /i: case-insensitive matching folds non-ASCII
+    # lookalikes such as the Kelvin sign onto ASCII letters.
+    HOSTNAME = /\A[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+\z/
     private_constant :HOSTNAME
 
     def environment_host(setting)
