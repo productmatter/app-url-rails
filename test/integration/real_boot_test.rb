@@ -42,11 +42,49 @@ class RealBootTest < Minitest::Test
       build_options: { repeat_setup: true }
     )
 
-    assert_equal({ "preserved.example" => 1, "dev.example" => 1, "tunnel.example" => 1 },
+    assert_equal({ "preserved.example" => 1, "dev.example" => 1, "tunnel.example" => 1,
+                   ".tunnels.example" => 0 },
                  result.fetch("host_counts"))
     assert_equal 3, result.fetch("cable_origin_count")
     assert_addresses(result, dev_url: "http://dev.example:3100",
                       tunnel_url: "https://tunnel.example:4443")
+  end
+
+  def test_repeated_setup_does_not_duplicate_the_tunnel_domain
+    result = boot(
+      dev_url: "http://dev.example:3100",
+      tunnel_url: "https://tunnel.example:4443",
+      tunnel_host: "tunnels.example",
+      with_action_cable: true,
+      build_options: { repeat_setup: true }
+    )
+
+    assert_equal 1, result.fetch("host_counts").fetch(".tunnels.example")
+    assert_equal 4, result.fetch("cable_origin_count")
+    assert_host_authorization(result, dev_url: true, tunnel_url: true, tunnel_host: true)
+    assert_cable_origins(result, dev_url: true, tunnel_url: true, tunnel_host: true)
+  end
+
+  def test_real_boot_with_tunnel_host_alone_allows_the_domain_and_subdomains
+    result = boot(dev_url: nil, tunnel_url: nil, tunnel_host: "tunnels.example", with_action_cable: true)
+
+    assert_addresses(result, dev_url: nil, tunnel_url: nil)
+    assert_host_authorization(result, dev_url: nil, tunnel_url: nil, tunnel_host: true)
+    assert_cable_origins(result, dev_url: nil, tunnel_url: nil, tunnel_host: true)
+  end
+
+  def test_real_boot_with_all_three_settings
+    result = boot(
+      dev_url: "http://dev.example:3100",
+      tunnel_url: "https://tunnel.example:4443",
+      tunnel_host: "tunnels.example",
+      with_action_cable: true
+    )
+
+    assert_addresses(result, dev_url: "http://dev.example:3100",
+                      tunnel_url: "https://tunnel.example:4443")
+    assert_host_authorization(result, dev_url: true, tunnel_url: true, tunnel_host: true)
+    assert_cable_origins(result, dev_url: true, tunnel_url: true, tunnel_host: true)
   end
 
   def test_setup_preserves_rails_default_localhost_cable_allowance_only_in_development
@@ -87,14 +125,16 @@ class RealBootTest < Minitest::Test
     result = boot(
       dev_url: "http://dev.example:3100",
       tunnel_url: "https://tunnel.example:4443",
+      tunnel_host: "tunnels.example",
       with_action_cable: true,
       rails_env: "test"
     )
 
     assert_addresses(result, dev_url: "http://dev.example:3100",
                       tunnel_url: "https://tunnel.example:4443")
-    assert_host_authorization(result, dev_url: true, tunnel_url: true)
-    assert_cable_origins(result, dev_url: true, tunnel_url: true)
+    assert_host_authorization(result, dev_url: true, tunnel_url: true, tunnel_host: true,
+                              rails_env: "test")
+    assert_cable_origins(result, dev_url: true, tunnel_url: true, tunnel_host: true)
   end
 
   def test_omitted_protocol_follows_rails_force_ssl_setting
@@ -133,11 +173,36 @@ class RealBootTest < Minitest::Test
     assert_nil error.fetch("cause")
     assert_equal({ "host" => "preserved.example", "protocol" => "https", "port" => 4444 },
                  result.fetch("url_options"))
-    assert_equal({ "preserved.example" => 1, "dev.example" => 0, "tunnel.example" => 0 },
+    assert_equal({ "preserved.example" => 1, "dev.example" => 0, "tunnel.example" => 0,
+                   ".tunnels.example" => 0 },
                  result.fetch("host_counts"))
     assert_equal 1, result.fetch("cable_origin_count")
     assert_equal 403, result.fetch("host_statuses").fetch("dev.example")
     assert_equal 403, result.fetch("host_statuses").fetch("tunnel.example")
+  end
+
+  def test_invalid_tunnel_host_is_reported_before_any_mutation
+    result = boot(
+      dev_url: "http://dev.example:3100",
+      tunnel_url: nil,
+      tunnel_host: "https://secret-sentinel.example",
+      with_action_cable: true,
+      build_options: { capture_setup_error: true }
+    )
+
+    error = result.fetch("setup_error")
+    assert_equal "AppUrl::ConfigurationError", error.fetch("class")
+    assert_match(/\ATUNNEL_HOST must not include a scheme;/, error.fetch("message"))
+    refute_includes error.fetch("message"), "secret-sentinel"
+    assert_nil error.fetch("cause")
+    assert_equal({ "host" => "preserved.example", "protocol" => "https", "port" => 4444 },
+                 result.fetch("url_options"))
+    assert_equal({ "preserved.example" => 1, "dev.example" => 0, "tunnel.example" => 0,
+                   ".tunnels.example" => 0 },
+                 result.fetch("host_counts"))
+    assert_equal 1, result.fetch("cable_origin_count")
+    assert_equal 403, result.fetch("host_statuses").fetch("dev.example")
+    assert_equal 403, result.fetch("host_statuses").fetch("s-1f3a.tunnels.example")
   end
 
   def test_explicit_protocol_and_dev_url_override_force_ssl_for_generated_addresses
@@ -285,10 +350,10 @@ class RealBootTest < Minitest::Test
 
   private
 
-  def boot(dev_url:, tunnel_url:, with_action_cable:, build_options: {}, **boot_options)
+  def boot(dev_url:, tunnel_url:, with_action_cable:, tunnel_host: nil, build_options: {}, **boot_options)
     Dir.mktmpdir("app-url-real-boot") do |root|
       RealBootApp.build(root, **build_options)
-      return RealBootApp.boot(root, dev_url:, tunnel_url:, with_action_cable:, **boot_options)
+      return RealBootApp.boot(root, dev_url:, tunnel_url:, tunnel_host:, with_action_cable:, **boot_options)
     end
   end
 
@@ -319,8 +384,9 @@ class RealBootTest < Minitest::Test
     end
   end
 
-  def assert_host_authorization(result, dev_url:, tunnel_url:)
+  def assert_host_authorization(result, dev_url:, tunnel_url:, tunnel_host: nil, rails_env: "development")
     statuses = result.fetch("host_statuses")
+    forwarded = result.fetch("forwarded_host_statuses")
     counts = result.fetch("host_counts")
 
     assert_equal 200, statuses.fetch("preserved.example")
@@ -333,9 +399,21 @@ class RealBootTest < Minitest::Test
     assert_equal 1, counts.fetch("preserved.example")
     assert_equal(dev_url ? 1 : 0, counts.fetch("dev.example"))
     assert_equal(tunnel_url ? 1 : 0, counts.fetch("tunnel.example"))
+
+    %w[s-1f3a.tunnels.example tunnels.example].each do |host|
+      assert_equal(tunnel_host ? 200 : 403, statuses.fetch(host), host)
+    end
+    %w[deep.s-1f3a.tunnels.example tunnels.example.evil eviltunnels.example].each do |host|
+      assert_equal 403, statuses.fetch(host), host
+    end
+    assert_equal(tunnel_host && rails_env == "development" ? 200 : 403,
+                 forwarded.fetch("s-1f3a.tunnels.example"))
+    assert_equal 403, forwarded.fetch("deep.s-1f3a.tunnels.example")
+    assert_equal 403, forwarded.fetch("tunnels.example.evil")
+    assert_equal(tunnel_host ? 1 : 0, counts.fetch(".tunnels.example"))
   end
 
-  def assert_cable_origins(result, dev_url:, tunnel_url:)
+  def assert_cable_origins(result, dev_url:, tunnel_url:, tunnel_host: nil)
     origins = result.fetch("cable_origins")
 
     assert origins.fetch("preserved")
@@ -346,7 +424,13 @@ class RealBootTest < Minitest::Test
     assert_equal !!tunnel_url, origins.fetch("tunnel")
     refute origins.fetch("tunnel_wrong_scheme")
     refute origins.fetch("tunnel_lookalike")
+    assert_equal !!tunnel_host, origins.fetch("tunnel_domain")
+    assert_equal !!tunnel_host, origins.fetch("tunnel_domain_apex")
+    refute origins.fetch("tunnel_domain_nested")
+    refute origins.fetch("tunnel_domain_wrong_scheme")
+    refute origins.fetch("tunnel_domain_lookalike")
     refute origins.fetch("unrelated")
-    assert_equal 1 + (dev_url ? 1 : 0) + (tunnel_url ? 1 : 0), result.fetch("cable_origin_count")
+    assert_equal 1 + (dev_url ? 1 : 0) + (tunnel_url ? 1 : 0) + (tunnel_host ? 1 : 0),
+                 result.fetch("cable_origin_count")
   end
 end

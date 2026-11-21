@@ -45,7 +45,8 @@ class AppUrl
     def configure_development!(config)
       development_origin = environment_origin("DEV_URL")
       tunnel_origin = environment_origin("TUNNEL_URL")
-      return unless development_origin || tunnel_origin
+      tunnel_domain = environment_host("TUNNEL_HOST")
+      return unless development_origin || tunnel_origin || tunnel_domain
 
       apply_development_origin(development_origin) if development_origin
 
@@ -53,6 +54,13 @@ class AppUrl
         append_once(config.hosts, origin.fetch(:host))
         append_cable_origin(config, origin) if config.respond_to?(:action_cable)
       end
+
+      return unless tunnel_domain
+
+      # Rails' leading-dot syntax allows the domain and one subdomain label,
+      # which covers git-treeline's per-session share hosts.
+      append_once(config.hosts, ".#{tunnel_domain}")
+      append_cable_domain(config, tunnel_domain) if config.respond_to?(:action_cable)
     end
 
     private
@@ -92,6 +100,28 @@ class AppUrl
       configuration_error(setting, "is malformed")
     end
 
+    # Explicit A-Z instead of /i: case-insensitive matching folds non-ASCII
+    # lookalikes such as the Kelvin sign onto ASCII letters.
+    HOSTNAME = /\A[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+\z/
+    private_constant :HOSTNAME
+
+    def environment_host(setting)
+      value = ENV[setting]
+      return nil if value.nil? || value.empty?
+
+      # ENV strings are binary under a C locale, so check the bytes as UTF-8 explicitly.
+      host_error(setting, "is malformed") unless value.dup.force_encoding(Encoding::UTF_8).valid_encoding?
+      host_error(setting, "must not be blank") if value.strip.empty?
+      host_error(setting, "must not include a scheme") if value.include?("://")
+      host_error(setting, "must not include a port") if value.include?(":")
+      host_error(setting, "must not include a path, query, or fragment") if value.match?(%r{[/?#]})
+      host_error(setting, "must not include userinfo") if value.include?("@")
+      host_error(setting, "must not start or end with a dot") if value.start_with?(".") || value.end_with?(".")
+      host_error(setting, "must be a dotted hostname") unless value.match?(HOSTNAME)
+
+      value
+    end
+
     def validate_port!(setting, authority)
       port = if authority.start_with?("[")
                closing_bracket = authority.index("]")
@@ -121,6 +151,12 @@ class AppUrl
       raise ConfigurationError, message, cause: nil
     end
 
+    def host_error(setting, reason)
+      message = "#{setting} #{reason}; expected a bare domain such as tunnels.example, " \
+                "without scheme, port, or path"
+      raise ConfigurationError, message, cause: nil
+    end
+
     def origin_options(origin)
       options = { host: origin.fetch(:host), protocol: origin.fetch(:scheme) }
       options[:port] = origin.fetch(:port) unless origin.fetch(:port) == origin.fetch(:default_port)
@@ -141,13 +177,22 @@ class AppUrl
     end
 
     def append_cable_origin(config, origin)
+      pattern = %r{\A#{Regexp.escape(origin.fetch(:scheme))}://#{Regexp.escape(origin.fetch(:host))}(?::\d+)?\z}i
+      append_once(cable_origins(config), pattern)
+    end
+
+    def append_cable_domain(config, domain)
+      pattern = %r{\Ahttps://(?:[a-z0-9-]+\.)?#{Regexp.escape(domain)}(?::\d+)?\z}i
+      append_once(cable_origins(config), pattern)
+    end
+
+    def cable_origins(config)
       origins = config.action_cable.allowed_request_origins
       # Preserve the default that the Action Cable engine supplies later during boot.
       origins = /https?:\/\/localhost:\d+/ if origins.nil? && Rails.env.development?
       origins = Array(origins)
       config.action_cable.allowed_request_origins = origins
-      pattern = %r{\A#{Regexp.escape(origin.fetch(:scheme))}://#{Regexp.escape(origin.fetch(:host))}(?::\d+)?\z}i
-      append_once(origins, pattern)
+      origins
     end
 
     def append_once(collection, value)

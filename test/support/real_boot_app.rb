@@ -143,7 +143,8 @@ module RealBootApp
 
   def boot_process(root, dev_url:, tunnel_url:, with_action_cable:, rails_env: "development",
                    force_ssl: false, omit_protocol: false, extra_default: false,
-                   public_helper: nil, cable_origins: :custom, protocol: "https", with_action_mailer: false)
+                   public_helper: nil, cable_origins: :custom, protocol: "https", with_action_mailer: false,
+                   tunnel_host: nil)
     environment = {
       "CABLE_ORIGINS" => cable_origins.nil? ? "nil" : cable_origins.to_s,
       "DEV_URL" => dev_url,
@@ -154,6 +155,7 @@ module RealBootApp
       "PUBLIC_HELPER" => public_helper&.to_s,
       "RAILS_ENV" => rails_env,
       "RACK_ENV" => rails_env,
+      "TUNNEL_HOST" => tunnel_host,
       "TUNNEL_URL" => tunnel_url,
       "WITH_ACTION_CABLE" => with_action_cable.to_s,
       "WITH_ACTION_MAILER" => with_action_mailer.to_s
@@ -191,7 +193,8 @@ module RealBootApp
       "public_base_url" => AppUrl.public_base_url,
       "public_route_url" => Rails.application.routes.url_helpers.probe_url(**AppUrl.public_url_options),
       "host_counts" => configured_host_counts,
-      "host_statuses" => host_statuses
+      "host_statuses" => host_statuses,
+      "forwarded_host_statuses" => forwarded_host_statuses
     }
     if defined?(ActionCable::Connection::Base)
       result["cable_origin_count"] = Array(Rails.application.config.action_cable.allowed_request_origins).size
@@ -205,14 +208,25 @@ module RealBootApp
 
   def host_statuses
     %w[preserved.example dev.example tunnel.example unrelated.example
-       dev.example.evil notdev.example tunnel.example.evil nottunnel.example].to_h do |host|
+       dev.example.evil notdev.example tunnel.example.evil nottunnel.example
+       s-1f3a.tunnels.example tunnels.example deep.s-1f3a.tunnels.example
+       tunnels.example.evil eviltunnels.example].to_h do |host|
       response = Rack::MockRequest.new(Rails.application).get("/probe", "HTTP_HOST" => host)
       [host, response.status]
     end
   end
 
+  def forwarded_host_statuses
+    %w[s-1f3a.tunnels.example deep.s-1f3a.tunnels.example tunnels.example.evil].to_h do |host|
+      response = Rack::MockRequest.new(Rails.application).get(
+        "/probe", "HTTP_HOST" => "127.0.0.1:4444", "HTTP_X_FORWARDED_HOST" => host
+      )
+      [host, response.status]
+    end
+  end
+
   def configured_host_counts
-    %w[preserved.example dev.example tunnel.example].to_h do |host|
+    %w[preserved.example dev.example tunnel.example .tunnels.example].to_h do |host|
       [host, Rails.application.config.hosts.count(host)]
     end
   end
@@ -227,6 +241,11 @@ module RealBootApp
       "tunnel" => "https://tunnel.example:99999",
       "tunnel_wrong_scheme" => "http://tunnel.example:4443",
       "tunnel_lookalike" => "https://tunnel.example.evil:4443",
+      "tunnel_domain" => "https://s-1f3a.tunnels.example:4443",
+      "tunnel_domain_apex" => "https://tunnels.example",
+      "tunnel_domain_nested" => "https://deep.s-1f3a.tunnels.example:4443",
+      "tunnel_domain_wrong_scheme" => "http://s-1f3a.tunnels.example",
+      "tunnel_domain_lookalike" => "https://s-1f3a.tunnels.example.evil",
       "unrelated" => "https://unrelated.example"
     }
 
@@ -303,6 +322,7 @@ module RealBootApp
       "url_options" => AppUrl.url_options.transform_keys(&:to_s),
       "host_counts" => configured_host_counts,
       "host_statuses" => host_statuses,
+      "forwarded_host_statuses" => forwarded_host_statuses,
       "cable_origin_count" => if defined?(ActionCable::Connection::Base)
                                 Rails.application.config.action_cable.allowed_request_origins.size
                               end

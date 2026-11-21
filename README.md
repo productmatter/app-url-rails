@@ -77,7 +77,7 @@ WebhookClient.register(callback_url: order_callback_url(**AppUrl.public_url_opti
 | `AppUrl.public_url_options` | Options hash derived from `TUNNEL_URL`, otherwise `AppUrl.url_options` |
 | `AppUrl.public_base_url` | Normalized tunnel origin (no trailing slash/default port), otherwise `AppUrl.base_url` |
 | `AppUrl.public_url` | Validated `TUNNEL_URL` with its original spelling, or `nil` |
-| `AppUrl.configure_development!(config)` | Validates both environment URLs and applies host, route-default, and Cable wiring |
+| `AppUrl.configure_development!(config)` | Validates the environment URLs and tunnel domain, then applies host, route-default, and Cable wiring |
 
 Use the unprefixed methods for internal-facing links (admin pages, in-app
 redirects). Use `public_*` for anything an external system must reach: webhook
@@ -85,15 +85,16 @@ callbacks, SMS links, OAuth redirects, partner API responses.
 
 ## Configuration
 
-Two environment variables, both optional, both conventionally development-only:
+Three environment variables, all optional, all conventionally development-only:
 
 | Variable | Purpose |
 | --- | --- |
 | `DEV_URL` | Browser-facing URL for development. Sets `default_url_options` and adds the host to `config.hosts`. |
 | `TUNNEL_URL` | Publicly reachable URL for development. Surfaces via `AppUrl.public_*` and is added to `config.hosts`. |
+| `TUNNEL_HOST` | Bare tunnel domain such as `tunnels.example`. Allows the domain and its immediate subdomains in `config.hosts` and as an `https` Action Cable origin. Does not affect any URL helper. |
 
-With neither set, the development environment behaves as it did before
-installing the gem. Both values are validated before any Rails configuration is
+With none set, the development environment behaves as it did before
+installing the gem. All values are validated before any Rails configuration is
 changed. When `DEV_URL` is set, the setup updates only the host, protocol, and
 effective port in `Rails.application.default_url_options`, preserving unrelated
 options. A default port also clears a stale non-default `:port`. Existing hosts
@@ -162,6 +163,29 @@ empty values mean no override.
 Restart Rails after changing these environment variables so boot-time host and
 Action Cable configuration are refreshed; public helpers still read
 `TUNNEL_URL` on demand.
+
+### Per-session tunnel hosts
+
+Some tunnel tooling serves one stable URL per worktree and also hands out
+random hosts under the same domain for ad-hoc sharing (git-treeline's
+`gtl share` serves `s-<random>.<your tunnel domain>`). Those hosts are not
+`TUNNEL_URL`, and the exact-host allowance does not cover them. Set
+`TUNNEL_HOST` to the bare domain instead:
+
+```sh
+export TUNNEL_URL=https://checkout-fix.tunnels.example   # the public origin
+export TUNNEL_HOST=tunnels.example                        # domain and immediate subdomains
+```
+
+Setup appends `.tunnels.example` to `config.hosts` and one `https` Action Cable
+origin pattern for the domain and its immediate subdomains on any port. A set
+value must be an ASCII dotted hostname with no scheme, port, path, or leading
+dot. Anything else raises `AppUrl::ConfigurationError`.
+
+This is a development allowance. Use a domain where only you or trusted
+teammates can create subdomains: sibling subdomains are same-site, so a page on
+any of them passes the Cable origin check with the developer's cookies. Keep
+`TUNNEL_HOST` unset in production.
 
 See [git-treeline and AppUrl Adoption](docs/git-treeline.md) for setup patterns
 with and without git-treeline, the Rails stack touchpoints `AppUrl` can feed,

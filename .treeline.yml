@@ -7,6 +7,8 @@ env:
   DEV_URL: "{router_url}"
   # Set to "{tunnel_url}" only after configuring and verifying a public tunnel.
   TUNNEL_URL: ""
+  # Bare tunnel domain; empty when no named tunnel is configured.
+  TUNNEL_HOST: "{tunnel_host}"
 
 commands:
   setup:

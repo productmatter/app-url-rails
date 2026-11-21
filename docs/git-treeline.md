@@ -16,10 +16,12 @@ git-treeline.
 | `PORT` | Port your Rails server binds to. | `bin/dev`, Procfile, git-treeline |
 | `DEV_URL` | Browser-facing app URL used for Rails URL helpers and `AppUrl.base_url`. | Manual env or git-treeline router URL |
 | `TUNNEL_URL` | Optional public URL for webhooks, SMS links, email links, Slack links, partner embeds, and other outside callers. | ngrok, Cloudflare Tunnel, git-treeline tunnel |
+| `TUNNEL_HOST` | Optional bare tunnel domain. Allows the domain and its immediate subdomains, including the random `s-<id>.<domain>` hosts `gtl share` hands out. | git-treeline `{tunnel_host}` |
 
 `DEV_URL` drives internal app URLs. `TUNNEL_URL` drives outsider-facing URLs
 through `AppUrl.public_*`. Keep them separate unless your development URL is
-also publicly reachable.
+also publicly reachable. `TUNNEL_HOST` generates no URLs; it only widens host
+authorization and Cable origins to the tunnel domain.
 
 ## Detecting a git-treeline App
 
@@ -35,6 +37,7 @@ env:
   PORT: "{port}"
   DEV_URL: "{router_url}"
   TUNNEL_URL: "{tunnel_url}"
+  TUNNEL_HOST: "{tunnel_host}"
 ```
 
 The important parts are:
@@ -45,10 +48,17 @@ The important parts are:
 - `DEV_URL: "{router_url}"` gives Rails a per-worktree browser URL.
 - `TUNNEL_URL: "{tunnel_url}"` gives outsider-facing links a per-worktree
   public URL when tunnel support is configured.
+- `TUNNEL_HOST: "{tunnel_host}"` is the bare domain of the developer's named
+  tunnel. It lets `gtl share` links (`https://s-<id>.<domain>`) reach Rails.
+
+Both tunnel tokens resolve from each developer's own named-tunnel config, so the
+committed file is static while the values differ per machine. Without a named
+tunnel they resolve to empty strings, which the gem treats as unset.
 
 If `.treeline.yml` exists but does not set `DEV_URL`, add it. If the app uses
 outside callbacks, email links, SMS links, Slack links, or webhook URLs in
-development, add `TUNNEL_URL` too.
+development, add `TUNNEL_URL` too. Add `TUNNEL_HOST` when developers share
+worktrees with `gtl share`.
 
 Use git-treeline commands to inspect the live values:
 
@@ -86,10 +96,19 @@ AppUrl.configure_development!(config)
 
 The gem owns the wiring behind the call:
 
-- `config.hosts` gets the `DEV_URL` host and, when set, the `TUNNEL_URL` host.
+- `config.hosts` gets the `DEV_URL` host and, when set, the `TUNNEL_URL` host
+  and `.{TUNNEL_HOST}` (the domain and its immediate subdomains).
 - `Rails.application.default_url_options` is derived from `DEV_URL`.
 - `config.action_cable.allowed_request_origins` accepts the `DEV_URL` and
-  `TUNNEL_URL` scheme/host on any port in development.
+  `TUNNEL_URL` scheme/host on any port in development, and `https` on
+  `TUNNEL_HOST` and its immediate subdomains.
+
+git-treeline's router (`gtl serve`) and share proxy (`gtl share`) reach Rails
+with `Host: 127.0.0.1:<port>` and the browser's host in `X-Forwarded-Host`.
+Rails checks both against `config.hosts`. The wiring above allows the forwarded
+host; the loopback `Host` passes only through Rails' default development IP
+allowance, so an app that replaces `config.hosts` with `=` or runs outside
+development still answers 403.
 
 The supported call location is the environment configure block, before Rails
 builds host middleware and applies Action Cable configuration. An appropriately
@@ -218,6 +237,7 @@ env:
   PORT: "{port}"
   DEV_URL: "{router_url}"
   TUNNEL_URL: "{tunnel_url}"
+  TUNNEL_HOST: "{tunnel_host}"
 ```
 
 Some apps use `.env.development` instead of `.env.local`; either is fine as
@@ -282,7 +302,7 @@ When installing `app-url-rails` in another Rails app:
    `AppUrl.configure_development!(config)` call are inside the configure block.
 3. Confirm the app loads its dev env file before Rails environment config runs.
 4. If `.treeline.yml` exists, ensure it writes `DEV_URL: "{router_url}"` and,
-   when useful, `TUNNEL_URL: "{tunnel_url}"`.
+   when useful, `TUNNEL_URL: "{tunnel_url}"` and `TUNNEL_HOST: "{tunnel_host}"`.
 5. Without git-treeline, set `PORT` and `DEV_URL` manually in the app's dev env
    file.
 6. Search app call sites with the command in "App-Level Wiring Checklist".
@@ -332,3 +352,12 @@ has a router port while old development wiring only allowed the portless
 
 If a public webhook, SMS, email, or partner link points at localhost, set
 `TUNNEL_URL` and make that call site use `AppUrl.public_*`.
+
+If a `gtl share` link returns `Blocked hosts`, set `TUNNEL_HOST` to the tunnel
+domain (`TUNNEL_HOST: "{tunnel_host}"` in `.treeline.yml`) and restart. Do not
+put a domain suffix in `TUNNEL_URL`; it must stay a full origin. `gtl share`
+falls back to a random `*.trycloudflare.com` host when no named tunnel is
+configured or that tunnel's daemon is already running. That hostname is random
+and known only after the share starts, so for quick tunnels add
+`config.hosts << ".trycloudflare.com"` to your local development configuration
+rather than the gem; the one-label rule keeps it as narrow as the hosts issued.
