@@ -1,7 +1,7 @@
 ---
 slug: tunnel-host
 type: feature
-status: building
+status: shipped
 decider: jonathan
 created: 2026-11-18
 build: attended
@@ -96,3 +96,11 @@ The git-treeline `share` hint that recommends `.trycloudflare.com` under a named
 domain, and the quick-tunnel fallback while a named tunnel daemon is running,
 are tool defects to fix in git-treeline. Version bump and release are a separate
 decision.
+
+## Acceptance results
+
+Shipped in [#8](https://github.com/productmatter/app-url-rails/pull/8)
+(`d5179f1`) and released as v2.1.0. CI
+[run 44944360944](https://github.com/productmatter/app-url-rails/actions/runs/44944360944)
+passed all ten Ruby 3.2/3.4 × Rails 7.0–8.1 entries; the local matrix recorded
+91 runs and 2,432 assertions per entry. Jonathan authorized the merge on green CI.
