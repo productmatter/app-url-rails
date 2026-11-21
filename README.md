@@ -173,15 +173,19 @@ random hosts under the same domain for ad-hoc sharing (git-treeline's
 `TUNNEL_HOST` to the bare domain instead:
 
 ```sh
-export TUNNEL_URL=https://checkout-fix.gtltunnel.dev   # the public origin
-export TUNNEL_HOST=gtltunnel.dev                        # domain and immediate subdomains
+export TUNNEL_URL=https://checkout-fix.tunnels.example   # the public origin
+export TUNNEL_HOST=tunnels.example                        # domain and immediate subdomains
 ```
 
-Setup appends `.gtltunnel.dev` to `config.hosts` and one `https` Action Cable
+Setup appends `.tunnels.example` to `config.hosts` and one `https` Action Cable
 origin pattern for the domain and its immediate subdomains on any port. A set
-value must be a dotted hostname with no scheme, port, path, or leading dot. Anything else
-raises `AppUrl::ConfigurationError`. This is a development allowance for a
-domain you control; keep `TUNNEL_HOST` unset in production.
+value must be an ASCII dotted hostname with no scheme, port, path, or leading
+dot. Anything else raises `AppUrl::ConfigurationError`.
+
+This is a development allowance. Use a domain where only you or trusted
+teammates can create subdomains: sibling subdomains are same-site, so a page on
+any of them passes the Cable origin check with the developer's cookies. Keep
+`TUNNEL_HOST` unset in production.
 
 See [git-treeline and AppUrl Adoption](docs/git-treeline.md) for setup patterns
 with and without git-treeline, the Rails stack touchpoints `AppUrl` can feed,

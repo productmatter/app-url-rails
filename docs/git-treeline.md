@@ -105,8 +105,10 @@ The gem owns the wiring behind the call:
 
 git-treeline's router (`gtl serve`) and share proxy (`gtl share`) reach Rails
 with `Host: 127.0.0.1:<port>` and the browser's host in `X-Forwarded-Host`.
-Rails checks both against `config.hosts`, so the forwarded host must be allowed
-too; the wiring above covers it.
+Rails checks both against `config.hosts`. The wiring above allows the forwarded
+host; the loopback `Host` passes only through Rails' default development IP
+allowance, so an app that replaces `config.hosts` with `=` or runs outside
+development still answers 403.
 
 The supported call location is the environment configure block, before Rails
 builds host middleware and applies Action Cable configuration. An appropriately
